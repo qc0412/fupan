@@ -3,11 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>近3日多次上龙虎榜个股</title>
+<title>多次上龙虎榜个股</title>
 <style>
   body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 20px; }
+  .container { width: 66%; max-width: 1180px; margin: 0 auto; }
   h1 { font-size: 1.4rem; color: #f5a623; margin-bottom: 4px; }
-  .meta { font-size: 0.8rem; color: #666; margin-bottom: 20px; }
+  .meta { font-size: 0.8rem; color: #666; margin-bottom: 12px; }
+  .filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-btn { padding: 5px 14px; border-radius: 4px; border: 1px solid #333; background: #1a1a1a; color: #aaa; cursor: pointer; font-size: 0.85rem; }
+  .filter-btn.active { border-color: #f5a623; color: #f5a623; background: #1f1a0f; }
   .dates { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   th { background: #1a1a1a; color: #aaa; padding: 10px 12px; text-align: left; border-bottom: 1px solid #333; }
@@ -24,31 +28,63 @@
 </style>
 </head>
 <body>
-<h1>近3日多次上龙虎榜个股</h1>
+<div class="container">
+<h1>多次上龙虎榜个股</h1>
 <div class="meta" id="updated">加载中...</div>
+<div class="filters">
+  <button class="filter-btn active" data-days="3">近3天</button>
+  <button class="filter-btn" data-days="7">近7天</button>
+</div>
 <div class="dates" id="dates"></div>
 <div id="content"></div>
+</div>
 <script>
+let allData = null;
+let activeDays = 3;
+
+function render() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - activeDays);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  const filtered = allData.data
+    .map(s => ({ ...s, appearances: s.appearances.filter(a => a.date >= cutoffStr) }))
+    .filter(s => s.appearances.length >= 2)
+    .sort((a, b) => b.appearances.length - a.appearances.length);
+
+  const days = [...new Set(filtered.flatMap(s => s.appearances.map(a => a.date)))].sort();
+  document.getElementById('dates').textContent = days.length ? '统计区间：' + days.join(' / ') : '';
+
+  if (!filtered.length) {
+    document.getElementById('content').innerHTML = '<div class="empty">暂无数据</div>';
+    return;
+  }
+  const rows = filtered.map(s => {
+    const days = s.appearances.map(a => {
+      const zf = parseFloat(a.zf);
+      const cls = zf > 0 ? 'zf-pos' : zf < 0 ? 'zf-neg' : 'zf-zero';
+      return `<span class="day-entry">${a.date} <span class="${cls}">${zf > 0 ? '+' : ''}${a.zf}%</span></span>`;
+    }).join('');
+    return `<tr><td class="name">${s.name}</td><td class="code">${s.code}</td><td class="count">${s.appearances.length}次</td><td>${days}</td></tr>`;
+  }).join('');
+  document.getElementById('content').innerHTML = `<table><thead><tr><th>股票</th><th>代码</th><th>上榜次数</th><th>各日涨跌幅</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeDays = parseInt(btn.dataset.days);
+    if (allData) render();
+  });
+});
+
 fetch('data/data.json?t=' + Date.now())
   .then(r => r.json())
   .then(d => {
+    allData = d;
     document.getElementById('updated').textContent = '更新时间：' + d.updated_at;
-    if (d.trading_days && d.trading_days.length)
-      document.getElementById('dates').textContent = '统计区间：' + d.trading_days.join(' / ');
-    if (!d.data || !d.data.length) {
-      document.getElementById('content').innerHTML = '<div class="empty">暂无数据（近3个交易日内无个股多次上榜）</div>';
-      return;
-    }
-    const rows = d.data.map(s => {
-      const days = s.appearances.map(a => {
-        const zf = parseFloat(a.zf);
-        const cls = zf > 0 ? 'zf-pos' : zf < 0 ? 'zf-neg' : 'zf-zero';
-        const sign = zf > 0 ? '+' : '';
-        return `<span class="day-entry">${a.date} <span class="${cls}">${sign}${a.zf}%</span></span>`;
-      }).join('');
-      return `<tr><td class="name">${s.name}</td><td class="code">${s.code}</td><td class="count">${s.appearances.length}次</td><td>${days}</td></tr>`;
-    }).join('');
-    document.getElementById('content').innerHTML = `<table><thead><tr><th>股票</th><th>代码</th><th>上榜次数</th><th>各日涨跌幅</th></tr></thead><tbody>${rows}</tbody></table>`;
+    render();
   })
   .catch(() => { document.getElementById('content').innerHTML = '<div class="empty">数据加载失败</div>'; });
 </script>

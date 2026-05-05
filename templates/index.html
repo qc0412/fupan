@@ -3,54 +3,124 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>近3日多次上龙虎榜个股</title>
+<title>多次上龙虎榜个股</title>
 <style>
-  body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 20px; }
-  h1 { font-size: 1.4rem; color: #f5a623; margin-bottom: 4px; }
-  .meta { font-size: 0.8rem; color: #666; margin-bottom: 20px; }
-  .dates { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  th { background: #1a1a1a; color: #aaa; padding: 10px 12px; text-align: left; border-bottom: 1px solid #333; }
-  td { padding: 10px 12px; border-bottom: 1px solid #222; }
-  tr:hover td { background: #1a1a1a; }
-  .count { font-weight: bold; color: #f5a623; font-size: 1.1rem; }
-  .name { color: #fff; font-weight: 500; }
-  .code { color: #888; font-size: 0.8rem; }
-  .zf-pos { color: #ff4d4d; }
-  .zf-neg { color: #4caf50; }
-  .zf-zero { color: #888; }
-  .day-entry { display: inline-block; margin-right: 12px; font-size: 0.82rem; }
-  .empty { text-align: center; padding: 60px; color: #555; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f0f2f5; color: #1a1a1a; min-height: 100vh; }
+
+  .header { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); padding: 20px 24px 16px; color: #fff; }
+  .header h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 4px; }
+  .header .meta { font-size: 0.78rem; opacity: 0.75; }
+
+  .main { max-width: 960px; margin: 20px auto; padding: 0 16px; }
+
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; }
+  .card-title { font-size: 0.95rem; font-weight: 600; color: #1a1a1a; display: flex; align-items: center; gap: 6px; }
+  .card-title::before { content: ''; display: inline-block; width: 4px; height: 16px; background: #e74c3c; border-radius: 2px; }
+
+  .filters { display: flex; gap: 6px; padding: 12px 18px; border-bottom: 1px solid #f0f0f0; }
+  .filter-btn { padding: 4px 14px; border-radius: 20px; border: 1px solid #e0e0e0; background: #fff; color: #666; cursor: pointer; font-size: 0.82rem; transition: all .15s; }
+  .filter-btn.active { border-color: #e74c3c; color: #e74c3c; background: #fff5f5; font-weight: 500; }
+  .filter-btn:hover:not(.active) { border-color: #ccc; color: #333; }
+
+  .dates { font-size: 0.78rem; color: #999; padding: 8px 18px; background: #fafafa; border-bottom: 1px solid #f0f0f0; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: #fafafa; }
+  th { padding: 10px 18px; text-align: left; font-size: 0.8rem; color: #999; font-weight: 500; border-bottom: 1px solid #f0f0f0; }
+  td { padding: 12px 18px; border-bottom: 1px solid #f5f5f5; font-size: 0.88rem; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+
+  .stock-name { font-weight: 600; color: #1a1a1a; font-size: 0.92rem; }
+  .stock-code { color: #aaa; font-size: 0.78rem; margin-top: 2px; }
+
+  .count-badge { display: inline-block; background: #fff0f0; color: #e74c3c; font-weight: 700; font-size: 1rem; padding: 2px 10px; border-radius: 6px; }
+
+  .appearances { display: flex; flex-wrap: wrap; gap: 6px; }
+  .day-tag { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f5; border-radius: 4px; padding: 3px 8px; font-size: 0.78rem; color: #666; }
+  .day-tag .date { color: #999; }
+  .zf-pos { color: #e74c3c; font-weight: 600; }
+  .zf-neg { color: #27ae60; font-weight: 600; }
+  .zf-zero { color: #999; }
+
+  .empty { text-align: center; padding: 60px; color: #bbb; font-size: 0.9rem; }
 </style>
 </head>
 <body>
-<h1>近3日多次上龙虎榜个股</h1>
-<div class="meta" id="updated">加载中...</div>
-<div class="dates" id="dates"></div>
-<div id="content"></div>
+
+<div class="header">
+  <h1>多次上龙虎榜个股</h1>
+  <div class="meta">更新时间：{{ updated_at }}</div>
+</div>
+
+<div class="main">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">上榜统计</div>
+    </div>
+    <div class="filters">
+      <button class="filter-btn active" data-days="3">近3交易日</button>
+      <button class="filter-btn" data-days="7">近7交易日</button>
+      <button class="filter-btn" data-days="10">近10交易日</button>
+    </div>
+    <div class="dates" id="dates"></div>
+    <div id="content"></div>
+  </div>
+</div>
+
 <script>
-fetch('data/data.json?t=' + Date.now())
-  .then(r => r.json())
-  .then(d => {
-    document.getElementById('updated').textContent = '更新时间：' + d.updated_at;
-    if (d.trading_days && d.trading_days.length)
-      document.getElementById('dates').textContent = '统计区间：' + d.trading_days.join(' / ');
-    if (!d.data || !d.data.length) {
-      document.getElementById('content').innerHTML = '<div class="empty">暂无数据（近3个交易日内无个股多次上榜）</div>';
-      return;
-    }
-    const rows = d.data.map(s => {
-      const days = s.appearances.map(a => {
-        const zf = parseFloat(a.zf);
-        const cls = zf > 0 ? 'zf-pos' : zf < 0 ? 'zf-neg' : 'zf-zero';
-        const sign = zf > 0 ? '+' : '';
-        return `<span class="day-entry">${a.date} <span class="${cls}">${sign}${a.zf}%</span></span>`;
-      }).join('');
-      return `<tr><td class="name">${s.name}</td><td class="code">${s.code}</td><td class="count">${s.appearances.length}次</td><td>${days}</td></tr>`;
+const raw = {{ data | tojson }};
+const tradingDays = {{ trading_days | tojson }};
+let activeDays = 3;
+
+function render() {
+  const allowedDates = new Set(tradingDays.slice(0, activeDays));
+
+  const filtered = raw
+    .map(s => ({ ...s, appearances: s.appearances.filter(a => allowedDates.has(a.date)) }))
+    .filter(s => s.appearances.length >= 2)
+    .sort((a, b) => b.appearances.length - a.appearances.length);
+
+  const days = [...new Set(filtered.flatMap(s => s.appearances.map(a => a.date)))].sort();
+  document.getElementById('dates').textContent = days.length ? '统计区间：' + days.join(' / ') : '';
+
+  if (!filtered.length) {
+    document.getElementById('content').innerHTML = '<div class="empty">暂无数据</div>';
+    return;
+  }
+
+  const rows = filtered.map(s => {
+    const tags = s.appearances.map(a => {
+      const zf = parseFloat(a.zf);
+      const cls = zf > 0 ? 'zf-pos' : zf < 0 ? 'zf-neg' : 'zf-zero';
+      return `<span class="day-tag"><span class="date">${a.date.slice(5)}</span><span class="${cls}">${zf > 0 ? '+' : ''}${a.zf}%</span></span>`;
     }).join('');
-    document.getElementById('content').innerHTML = `<table><thead><tr><th>股票</th><th>代码</th><th>上榜次数</th><th>各日涨跌幅</th></tr></thead><tbody>${rows}</tbody></table>`;
-  })
-  .catch(() => { document.getElementById('content').innerHTML = '<div class="empty">数据加载失败</div>'; });
+    return `<tr>
+      <td><div class="stock-name">${s.name}</div><div class="stock-code">${s.code}</div></td>
+      <td><span class="count-badge">${s.appearances.length}次</span></td>
+      <td><div class="appearances">${tags}</div></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('content').innerHTML = `<table>
+    <thead><tr><th>股票</th><th>上榜次数</th><th>各日涨跌幅</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeDays = parseInt(btn.dataset.days);
+    render();
+  });
+});
+
+render();
 </script>
 </body>
 </html>

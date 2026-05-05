@@ -90,7 +90,7 @@ def fetch_multi_day_lhb():
     trading_days = []
     day_data = {}
     d = date.today()
-    while len(trading_days) < 3 and (date.today() - d).days < 30:
+    while len(trading_days) < 30 and (date.today() - d).days < 60:
         if d.weekday() < 5:
             date_str = d.strftime("%Y-%m-%d")
             data = get_lhb(date_str)
@@ -109,11 +109,14 @@ def fetch_multi_day_lhb():
             if code in seen:
                 continue
             seen.add(code)
+            name = item["info"]["name"]
+            if code.startswith("9") or "ST" in name.upper():
+                continue
             if code not in stock_map:
-                stock_map[code] = {"name": item["info"]["name"], "code": code, "appearances": []}
+                stock_map[code] = {"name": name, "code": code, "appearances": []}
             stock_map[code]["appearances"].append({"date": date_str, "zf": item["info"]["zf"]})
 
-    result = [v for v in stock_map.values() if len(v["appearances"]) >= 2]
+    result = list(stock_map.values())
     result.sort(key=lambda x: -len(x["appearances"]))
     return result, trading_days
 
