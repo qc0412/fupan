@@ -20,17 +20,42 @@ jobs:
         with:
           python-version: '3.11'
 
-      - run: pip install requests
+      - run: pip install requests jinja2
 
       - run: python scraper.py
         env:
           DXX_USERNAME: ${{ secrets.DXX_USERNAME }}
           DXX_PASSWORD: ${{ secrets.DXX_PASSWORD }}
 
+      - name: Render index.html
+        run: |
+          python - <<'EOF'
+          import json
+          from jinja2 import Environment, FileSystemLoader
+          with open("data/data.json", encoding="utf-8") as f:
+              d = json.load(f)
+          env = Environment(loader=FileSystemLoader("templates"))
+          html = env.get_template("index.html").render(
+              updated_at=d["updated_at"],
+              data=d["data"],
+              trading_days=d["trading_days"],
+          )
+          with open("index.html", "w", encoding="utf-8") as f:
+              f.write(html)
+          EOF
+
       - name: Commit data
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/data.json
+          git add data/data.json index.html
           git diff --cached --quiet || git commit -m "update data $(date '+%Y-%m-%d %H:%M')"
           git push
+
+      - name: Deploy to main
+        run: |
+          git fetch origin main
+          git checkout main
+          git checkout dev -- index.html
+          git diff --cached --quiet || git commit -m "deploy $(date '+%Y-%m-%d %H:%M')"
+          git push origin main
