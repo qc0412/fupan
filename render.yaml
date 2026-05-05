@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: lhb-tracker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: DXX_USERNAME
+        sync: false
+      - key: DXX_PASSWORD
+        sync: false

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>近3日多次上龙虎榜个股</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 20px; }
+  h1 { font-size: 1.4rem; color: #f5a623; margin-bottom: 4px; }
+  .meta { font-size: 0.8rem; color: #666; margin-bottom: 20px; }
+  .dates { font-size: 0.85rem; color: #888; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th { background: #1a1a1a; color: #aaa; padding: 10px 12px; text-align: left; border-bottom: 1px solid #333; }
+  td { padding: 10px 12px; border-bottom: 1px solid #222; }
+  tr:hover td { background: #1a1a1a; }
+  .count { font-weight: bold; color: #f5a623; font-size: 1.1rem; }
+  .name { color: #fff; font-weight: 500; }
+  .code { color: #888; font-size: 0.8rem; }
+  .zf-pos { color: #ff4d4d; }
+  .zf-neg { color: #4caf50; }
+  .zf-zero { color: #888; }
+  .day-entry { display: inline-block; margin-right: 12px; font-size: 0.82rem; }
+  .empty { text-align: center; padding: 60px; color: #555; }
+</style>
+</head>
+<body>
+<h1>近3日多次上龙虎榜个股</h1>
+<div class="meta" id="updated">加载中...</div>
+<div class="dates" id="dates"></div>
+<div id="content"></div>
+<script>
+fetch('data/data.json?t=' + Date.now())
+  .then(r => r.json())
+  .then(d => {
+    document.getElementById('updated').textContent = '更新时间：' + d.updated_at;
+    if (d.trading_days && d.trading_days.length)
+      document.getElementById('dates').textContent = '统计区间：' + d.trading_days.join(' / ');
+    if (!d.data || !d.data.length) {
+      document.getElementById('content').innerHTML = '<div class="empty">暂无数据（近3个交易日内无个股多次上榜）</div>';
+      return;
+    }
+    const rows = d.data.map(s => {
+      const days = s.appearances.map(a => {
+        const zf = parseFloat(a.zf);
+        const cls = zf > 0 ? 'zf-pos' : zf < 0 ? 'zf-neg' : 'zf-zero';
+        const sign = zf > 0 ? '+' : '';
+        return `<span class="day-entry">${a.date} <span class="${cls}">${sign}${a.zf}%</span></span>`;
+      }).join('');
+      return `<tr><td class="name">${s.name}</td><td class="code">${s.code}</td><td class="count">${s.appearances.length}次</td><td>${days}</td></tr>`;
+    }).join('');
+    document.getElementById('content').innerHTML = `<table><thead><tr><th>股票</th><th>代码</th><th>上榜次数</th><th>各日涨跌幅</th></tr></thead><tbody>${rows}</tbody></table>`;
+  })
+  .catch(() => { document.getElementById('content').innerHTML = '<div class="empty">数据加载失败</div>'; });
+</script>
+</body>
+</html>

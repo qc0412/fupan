@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.cookie_cache
+.DS_Store
