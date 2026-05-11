@@ -77,10 +77,24 @@ const tradingDays = ["2026-05-11", "2026-05-08", "2026-05-07", "2026-05-06", "20
 let activeDays = 3;
 
 function render() {
-  const allowedDates = new Set(tradingDays.slice(0, activeDays));
+  const window = tradingDays.slice(0, activeDays);
 
   const filtered = raw
-    .map(s => ({ ...s, appearances: s.appearances.filter(a => allowedDates.has(a.date)) }))
+    .map(s => {
+      const zfMap = new Map(s.appearances.map(a => [a.date, a.zf]));
+      let longest = [];
+      let current = [];
+      for (const day of window) {
+        if (zfMap.has(day)) {
+          current.push({ date: day, zf: zfMap.get(day) });
+        } else {
+          if (current.length > longest.length) longest = current;
+          current = [];
+        }
+      }
+      if (current.length > longest.length) longest = current;
+      return { ...s, appearances: longest };
+    })
     .filter(s => s.appearances.length >= 2)
     .sort((a, b) => b.appearances.length - a.appearances.length);
 
@@ -100,13 +114,13 @@ function render() {
     }).join('');
     return `<tr>
       <td><div class="stock-name">${s.name}</div><div class="stock-code">${s.code}</div></td>
-      <td><span class="count-badge">${s.appearances.length}次</span></td>
+      <td><span class="count-badge">连${s.appearances.length}天</span></td>
       <td><div class="appearances">${tags}</div></td>
     </tr>`;
   }).join('');
 
   document.getElementById('content').innerHTML = `<table>
-    <thead><tr><th>股票</th><th>上榜次数</th><th>各日涨跌幅</th></tr></thead>
+    <thead><tr><th>股票</th><th>连续上榜</th><th>连续涨跌幅</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }

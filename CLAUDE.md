@@ -1,18 +1,63 @@
-# fupan
+# CLAUDE.md
 
-A股短线龙头交易知识库与复盘系统。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 项目结构
+## 项目概述
 
-- `myMd/短线交易系统.md` — 核心交易体系（买入/卖出条件、仓位管理）
-- `myMd/A股短线龙头复盘框架 V1.0（优化版）.md` — 复盘评分框架
-- `myMd/复盘.md` — 每日复盘流程清单
+两部分组成：
 
-## MCP 配置
+1. **龙虎榜数据爬虫 + 静态展示页** — 抓取 `duanxianxia.cn` 龙虎榜数据，聚合近 30 个交易日多次上榜个股，渲染为单页 `index.html`。
+2. **A股短线龙头交易知识库** (`myMd/`) — Markdown 文档，配合 `fupan` / `fupan-week` 等 skill 使用。
 
-`.claude/settings.local.json` 启用了 `astock-data` MCP 服务，提供 A 股行情数据。
+## 常用命令
 
-## 使用说明
+```bash
+# 本地跑爬虫（生成 data/data.json）
+python scraper.py
 
-本项目无代码、无构建步骤。所有内容为 Markdown 文档。
-使用 `fupan` skill 进行每日复盘分析。
+# 本地起 Flask（端口 5002，启动时刷新一次，每天 18:00 定时刷新）
+python app.py
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+爬虫鉴权：从环境变量 `DXX_USERNAME` / `DXX_PASSWORD` 读取，或回退到 `~/.claude/duanxianxia_credentials.json`。Cookie 缓存在仓库根的 `.cookie_cache`（已 gitignore）。
+
+## 架构关键点
+
+### 数据流与分支策略
+
+`fetch.yml` 工作流是生产路径，本地 `app.py` 主要用于调试：
+
+1. **dev 分支**（GitHub Actions 周一~周五 18:00 北京时间运行）：
+   - `python scraper.py` 写 `data/data.json`
+   - 内联 Python 用 `templates/index.html` 模板渲染成根目录 `index.html`
+   - 提交 `data/data.json` + `index.html` 到 dev
+2. **main 分支**：workflow 只把 dev 的 `index.html` cherry-pick 过来，作为对外静态站点。
+
+**修改模板/数据逻辑时**：在 dev 上改 `templates/index.html` 和 `scraper.py`，让 workflow 重新渲染；不要手动改根目录 `index.html`（它会被覆盖）。
+
+### scraper.py 设计
+
+- `_get_session()` 优先使用磁盘 cookie；`get_lhb()` 在响应为空时自动 `_login()` 重试一次，处理 cookie 失效。
+- `fetch_multi_day_lhb()` 向前回溯最多 60 天找出 30 个有数据的交易日（跳过周末和无数据日）。
+- 过滤规则：剔除以 `9` 开头的代码（B股）和名称含 `ST` 的个股；同一日同股票只保留首条记录。
+- 输出按上榜次数倒序排序。
+
+### 展示页过滤
+
+`templates/index.html` 内置 JS 按"近 N 交易日上榜 ≥2 次"动态过滤，N 由按钮切换（3/7/10）。`trading_days` 数组由后端给定，前端只做切片。
+
+## MCP 与 Skill
+
+- `.claude/settings.local.json` 启用 `astock-data` MCP，提供实时 A 股行情查询。
+- 复盘任务调用 skill：日复盘 `fupan`、周复盘 `fupan-week`、龙头识别 `earlyLeader`。
+- 知识库文档：
+  - `myMd/短线交易系统.md` — 交易体系（最强票选股逻辑、买卖条件、仓位管理）
+  - `myMd/A股短线龙头复盘框架 V1.0（优化版）.md` — 评分框架
+  - `myMd/复盘.md` — 每日复盘流程清单
+
+## 部署
+
+`render.yaml` 仍保留 Flask + Render.com 部署能力（需在 Render 配置 `DXX_USERNAME` / `DXX_PASSWORD`），但当前主部署路径是 GitHub Actions 生成静态 `index.html` 推到 main 分支。
