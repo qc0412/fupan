@@ -3,27 +3,31 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多次上龙虎榜个股</title>
+<title>短线龙头复盘</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f0f2f5; color: #1a1a1a; min-height: 100vh; }
 
-  .header { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); padding: 20px 24px 16px; color: #fff; }
-  .header h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 4px; }
-  .header .meta { font-size: 0.78rem; opacity: 0.75; }
+  .main { max-width: 960px; margin: 16px auto; padding: 0 12px 32px; }
 
-  .main { max-width: 960px; margin: 20px auto; padding: 0 16px; }
+  .tabs { display: flex; align-items: center; background: #fff; border-radius: 999px; padding: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 14px; }
+  .tab { flex: 1; text-align: center; padding: 10px 14px; font-size: 0.95rem; font-weight: 500; color: #666; border-radius: 999px; cursor: pointer; transition: all .2s; user-select: none; }
+  .tab.active { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); color: #fff; box-shadow: 0 2px 8px rgba(231,76,60,.3); }
+  .tab:hover:not(.active) { color: #1a1a1a; }
+
+  .meta { text-align: right; font-size: 0.72rem; color: #aaa; padding: 0 4px 10px; }
 
   .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+  .pane { display: none; }
+  .pane.active { display: block; }
 
-  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; }
-  .card-title { font-size: 0.95rem; font-weight: 600; color: #1a1a1a; display: flex; align-items: center; gap: 6px; }
-  .card-title::before { content: ''; display: inline-block; width: 4px; height: 16px; background: #e74c3c; border-radius: 2px; }
-
-  .filters { display: flex; gap: 6px; padding: 12px 18px; border-bottom: 1px solid #f0f0f0; }
+  .filters { display: flex; gap: 6px; padding: 14px 18px; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; align-items: center; }
   .filter-btn { padding: 4px 14px; border-radius: 20px; border: 1px solid #e0e0e0; background: #fff; color: #666; cursor: pointer; font-size: 0.82rem; transition: all .15s; }
   .filter-btn.active { border-color: #e74c3c; color: #e74c3c; background: #fff5f5; font-weight: 500; }
   .filter-btn:hover:not(.active) { border-color: #ccc; color: #333; }
+  .filter-sep { width: 100%; height: 0; }
+  .filter-label { font-size: 0.78rem; color: #aaa; margin-right: 4px; }
+  .sort-btn.active { border-color: #e67e22; color: #e67e22; background: #fff8f0; }
 
   .dates { font-size: 0.78rem; color: #999; padding: 8px 18px; background: #fafafa; border-bottom: 1px solid #f0f0f0; }
 
@@ -47,27 +51,114 @@
   .zf-zero { color: #999; }
 
   .empty { text-align: center; padding: 60px; color: #bbb; font-size: 0.9rem; }
+
+  .jjyd-table td { padding: 10px 14px; font-size: 0.85rem; }
+  .jjyd-table th { padding: 10px 14px; }
+  .jjyd-table .money-up { color: #e74c3c; font-weight: 600; }
+  .jjyd-table .money-down { color: #27ae60; font-weight: 600; }
+  .jjyd-table .ban-tag { display: inline-block; background: #fff0e0; color: #d35400; font-size: 0.75rem; padding: 2px 7px; border-radius: 4px; font-weight: 500; white-space: nowrap; margin-top: 4px; }
+  .jjyd-table .ban-tag.first { background: #e8f4ff; color: #2980b9; }
+  .jjyd-table .ban-tag.lianban { background: #ffe8e8; color: #c0392b; }
+  .jjyd-table .concept { color: #666; font-size: 0.78rem; line-height: 1.4; }
+  .jjyd-table .pair { font-size: 0.78rem; color: #888; }
+  .jjyd-table .pair .v1 { color: #1a1a1a; font-weight: 600; font-size: 0.85rem; }
+  .jjyd-table .pct-jj { color: #f39c12; font-weight: 600; font-size: 0.82rem; }
+
+  /* 大资金情绪 */
+  .capital-hero { padding: 24px 20px; display: flex; align-items: center; gap: 24px; background: linear-gradient(180deg, #fafbfc 0%, #fff 100%); border-bottom: 1px solid #f0f0f0; }
+  .temp-gauge { position: relative; width: 110px; height: 110px; flex-shrink: 0; }
+  .temp-gauge svg { transform: rotate(-90deg); }
+  .temp-gauge .temp-num { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .temp-gauge .temp-num .v { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+  .temp-gauge .temp-num .l { font-size: 0.7rem; color: #999; margin-top: 4px; }
+  .capital-stats { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .capital-stats .stat { display: flex; flex-direction: column; gap: 2px; }
+  .capital-stats .stat .label { font-size: 0.72rem; color: #999; }
+  .capital-stats .stat .val { font-size: 0.95rem; font-weight: 600; color: #1a1a1a; }
+  .signals { padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #f0f0f0; background: #fafafa; }
+  .signal { padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+  .signal.warn { background: #fff0f0; color: #c0392b; border: 1px solid #ffe0e0; }
+  .signal.ok { background: #ecfdf5; color: #16a34a; border: 1px solid #d1fae5; }
+  .signal.neutral { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+  .signal .tip { color: #999; font-weight: 400; font-size: 0.7rem; margin-left: 2px; }
+  .top-volume-table .industry { font-size: 0.78rem; color: #888; }
+  .top-volume-table .rank { color: #bbb; font-size: 0.78rem; margin-right: 6px; }
+
+  @media (max-width: 640px) {
+    .tab { padding: 9px 8px; font-size: 0.9rem; }
+    th, td { padding: 10px 12px; }
+    .jjyd-table th, .jjyd-table td { padding: 8px 10px; }
+    .jjyd-table .col-ltsz, .jjyd-table .col-fd { display: none; }
+    .capital-hero { flex-direction: column; gap: 16px; padding: 18px 16px; }
+    .capital-stats { width: 100%; }
+    .top-volume-table .col-amp, .top-volume-table .col-hsl { display: none; }
+  }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>多次上龙虎榜个股</h1>
-  <div class="meta">更新时间：{{ updated_at }}</div>
-</div>
-
 <div class="main">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">上榜统计</div>
+  <div class="tabs">
+    <div class="tab active" data-pane="lhb">多次上榜</div>
+    <div class="tab" data-pane="jjyd">竞价异动</div>
+    <div class="tab" data-pane="capital">大资金情绪</div>
+  </div>
+  <div class="meta">更新时间：{{ updated_at }}</div>
+
+  <div class="pane active" id="pane-lhb">
+    <div class="card">
+      <div class="filters">
+        <button class="filter-btn lhb-btn active" data-days="3">近3交易日</button>
+        <button class="filter-btn lhb-btn" data-days="7">近7交易日</button>
+        <button class="filter-btn lhb-btn" data-days="10">近10交易日</button>
+      </div>
+      <div class="dates" id="dates"></div>
+      <div id="content"></div>
     </div>
-    <div class="filters">
-      <button class="filter-btn active" data-days="3">近3交易日</button>
-      <button class="filter-btn" data-days="7">近7交易日</button>
-      <button class="filter-btn" data-days="10">近10交易日</button>
+  </div>
+
+  <div class="pane" id="pane-capital">
+    <div class="card">
+      <div class="capital-hero">
+        <div class="temp-gauge">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <circle cx="55" cy="55" r="48" fill="none" stroke="#f0f0f0" stroke-width="9"/>
+            <circle id="temp-arc" cx="55" cy="55" r="48" fill="none" stroke="#e74c3c" stroke-width="9" stroke-linecap="round" stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
+          </svg>
+          <div class="temp-num">
+            <div class="v" id="temp-value">--</div>
+            <div class="l">情绪温度</div>
+          </div>
+        </div>
+        <div class="capital-stats">
+          <div class="stat"><span class="label">红绿比</span><span class="val" id="cap-rg">--</span></div>
+          <div class="stat"><span class="label">平均涨幅</span><span class="val" id="cap-avg">--</span></div>
+          <div class="stat"><span class="label">合计成交</span><span class="val" id="cap-turn">--</span></div>
+          <div class="stat"><span class="label">主力净额</span><span class="val" id="cap-zhuli">--</span></div>
+        </div>
+      </div>
+      <div class="signals" id="cap-signals"></div>
+      <div id="capital-content"></div>
     </div>
-    <div class="dates" id="dates"></div>
-    <div id="content"></div>
+  </div>
+
+  <div class="pane" id="pane-jjyd">
+    <div class="card">
+      <div class="filters">
+        <button class="filter-btn jjyd-btn active" data-mode="all">全部</button>
+        <button class="filter-btn jjyd-btn" data-mode="lianban">仅连板</button>
+        <button class="filter-btn jjyd-btn" data-mode="shouban">仅首板</button>
+        <div class="filter-sep"></div>
+        <span class="filter-label">排序</span>
+        <button class="filter-btn sort-btn active" data-sort="zhuli">主力净额</button>
+        <button class="filter-btn sort-btn" data-sort="weimai">委买</button>
+        <button class="filter-btn sort-btn" data-sort="cuohe">撮合</button>
+        <button class="filter-btn sort-btn" data-sort="jjzf">竞价涨幅</button>
+        <button class="filter-btn sort-btn" data-sort="fengdan">封单</button>
+      </div>
+      <div class="dates" id="jjyd-summary"></div>
+      <div id="jjyd-content"></div>
+    </div>
   </div>
 </div>
 
@@ -120,9 +211,9 @@ function render() {
   </table>`;
 }
 
-document.querySelectorAll('.filter-btn').forEach(btn => {
+document.querySelectorAll('.lhb-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.lhb-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     activeDays = parseInt(btn.dataset.days);
     render();
@@ -130,6 +221,212 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 });
 
 render();
+
+// 竞价异动
+const jjydRaw = {{ jjyd | tojson }};
+let jjydMode = 'all';
+let jjydSort = 'zhuli';
+
+function sortKey(s, key) {
+  const v = s[key];
+  if (v === 'none' || v === null || v === undefined || v === '') return -Infinity;
+  const n = Number(v);
+  return isNaN(n) ? -Infinity : n;
+}
+
+function fmtYuan(v) {
+  v = Number(v) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1e8) return (v / 1e8).toFixed(1) + '亿';
+  if (abs >= 1e4) return Math.round(v / 1e4) + '万';
+  return v.toString();
+}
+function fmtWan(v) {
+  v = Number(v) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1e4) return (v / 1e4).toFixed(1) + '亿';
+  return Math.round(v) + '万';
+}
+function banClass(ban) {
+  if (!ban) return '';
+  if (/首板/.test(ban)) return 'first';
+  if (/连板|天.板/.test(ban)) return 'lianban';
+  return '';
+}
+function lianbanCount(ban) {
+  if (!ban) return 0;
+  let m = ban.match(/(\d+)\s*连板/);
+  if (m) return parseInt(m[1]);
+  m = ban.match(/(\d+)\s*天\s*(\d+)\s*板/);
+  if (m) return parseInt(m[2]);
+  if (/首板/.test(ban)) return 1;
+  return 0;
+}
+
+function renderJjyd() {
+  let list = jjydRaw.slice();
+  if (jjydMode === 'lianban') {
+    list = list.filter(s => lianbanCount(s.ban) >= 2);
+  } else if (jjydMode === 'shouban') {
+    list = list.filter(s => /首板/.test(s.ban || ''));
+  }
+  list.sort((a, b) => sortKey(b, jjydSort) - sortKey(a, jjydSort));
+
+  const sortLabels = { zhuli: '主力净额', weimai: '委买', cuohe: '撮合', jjzf: '竞价涨幅', fengdan: '封单' };
+  const summary = document.getElementById('jjyd-summary');
+  const content = document.getElementById('jjyd-content');
+  summary.textContent = list.length ? `共 ${list.length} 只，按${sortLabels[jjydSort]}降序` : '';
+
+  if (!list.length) {
+    content.innerHTML = '<div class="empty">暂无数据</div>';
+    return;
+  }
+
+  const rows = list.map(s => {
+    const zf = Number(s.zf);
+    const zfCls = zf > 0 ? 'money-up' : zf < 0 ? 'money-down' : '';
+    const jjzfRaw = s.jjzf;
+    let jjzfHtml = '';
+    if (jjzfRaw !== 'none' && jjzfRaw !== null && jjzfRaw !== undefined) {
+      const jv = Number(jjzfRaw);
+      jjzfHtml = `<div class="pct-jj">竞${jv > 0 ? '+' : ''}${jjzfRaw}%</div>`;
+    }
+    const zfHtml = `<div class="${zfCls}">${zf > 0 ? '+' : ''}${s.zf}%</div>`;
+
+    const zhuli = Number(s.zhuli) || 0;
+    const zhuliCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
+    const zhuliText = zhuli ? fmtYuan(zhuli) : '--';
+
+    const banCls = banClass(s.ban);
+    const banHtml = s.ban ? `<span class="ban-tag ${banCls}">${s.ban}</span>` : '';
+
+    return `<tr>
+      <td>
+        <div class="stock-name">${s.name}</div>
+        <div class="stock-code">${s.code}</div>
+        ${banHtml}
+      </td>
+      <td>${jjzfHtml}${zfHtml}</td>
+      <td><div class="pair"><span class="v1">${fmtYuan(s.weimai)}</span><br>${fmtYuan(s.cuohe)}</div></td>
+      <td><span class="${zhuliCls}">${zhuliText}</span></td>
+      <td class="col-fd">${s.fengdan ? fmtWan(s.fengdan) : '--'}</td>
+      <td class="col-ltsz">${fmtYuan(s.ltsz)}</td>
+      <td><div class="concept">${(s.concept || '').replace('、', '<br>')}</div></td>
+    </tr>`;
+  }).join('');
+
+  content.innerHTML = `<table class="jjyd-table">
+    <thead><tr>
+      <th>股票/板</th>
+      <th>竞价/现价</th>
+      <th>委买/撮合</th>
+      <th>主力</th>
+      <th class="col-fd">封单</th>
+      <th class="col-ltsz">流通</th>
+      <th>概念</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+document.querySelectorAll('.jjyd-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.jjyd-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    jjydMode = btn.dataset.mode;
+    renderJjyd();
+  });
+});
+
+document.querySelectorAll('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    jjydSort = btn.dataset.sort;
+    renderJjyd();
+  });
+});
+
+renderJjyd();
+
+// 大资金情绪
+const topVolume = {{ top_volume | tojson }};
+const capitalSignals = {{ capital_signals | tojson }};
+
+function tempColor(t) {
+  if (t >= 65) return '#e74c3c';
+  if (t <= 35) return '#27ae60';
+  return '#f39c12';
+}
+
+function renderCapital() {
+  const hasData = topVolume.length > 0 && capitalSignals.temp != null;
+  const t = hasData ? capitalSignals.temp : 50;
+  const arcLen = 301.6; // 2 * PI * 48
+  const arc = document.getElementById('temp-arc');
+  arc.setAttribute('stroke', hasData ? tempColor(t) : '#ddd');
+  arc.setAttribute('stroke-dashoffset', hasData ? arcLen * (1 - t / 100) : arcLen);
+
+  const tv = document.getElementById('temp-value');
+  tv.textContent = hasData ? t : '--';
+  tv.style.color = hasData ? tempColor(t) : '#bbb';
+
+  const up = capitalSignals.up_count || 0;
+  const down = capitalSignals.down_count || 0;
+  const flat = capitalSignals.flat_count || 0;
+  const ratio = down > 0 ? (up / down).toFixed(2) : (up ? '∞' : '0');
+  document.getElementById('cap-rg').innerHTML = `<span class="money-up">${up}红</span> / <span class="money-down">${down}绿</span>${flat ? ` · ${flat}平` : ''} <span style="color:#999;font-weight:400;font-size:0.78rem;">(${ratio})</span>`;
+
+  const avg = capitalSignals.avg_zf ?? 0;
+  const avgCls = avg > 0 ? 'money-up' : avg < 0 ? 'money-down' : '';
+  document.getElementById('cap-avg').innerHTML = `<span class="${avgCls}">${avg > 0 ? '+' : ''}${avg}%</span>`;
+
+  document.getElementById('cap-turn').textContent = fmtYuan(capitalSignals.sum_turnover || 0);
+
+  const zhuli = capitalSignals.sum_zhuli || 0;
+  const zCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
+  document.getElementById('cap-zhuli').innerHTML = `<span class="${zCls}">${zhuli >= 0 ? '+' : '-'}${fmtYuan(Math.abs(zhuli))}</span>`;
+
+  const sigBox = document.getElementById('cap-signals');
+  const sigs = capitalSignals.signals || [];
+  sigBox.innerHTML = sigs.map(s => `<span class="signal ${s.type}">${s.label}${s.tip ? `<span class="tip">${s.tip}</span>` : ''}</span>`).join('');
+
+  const tbody = topVolume.map((s, i) => {
+    const zf = Number(s.zf) || 0;
+    const zfCls = zf > 0 ? 'money-up' : zf < 0 ? 'money-down' : '';
+    const zhuli = Number(s.zhuli) || 0;
+    const zCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
+    return `<tr>
+      <td><span class="rank">${i + 1}</span><span class="stock-name">${s.name}</span><div class="stock-code">${s.code}</div></td>
+      <td><span class="${zfCls}">${zf > 0 ? '+' : ''}${zf}%</span></td>
+      <td>${fmtYuan(s.turnover)}</td>
+      <td><span class="${zCls}">${zhuli ? (zhuli >= 0 ? '+' : '-') + fmtYuan(Math.abs(zhuli)) : '--'}</span></td>
+      <td class="col-hsl">${s.hsl != null ? s.hsl + '%' : '--'}</td>
+      <td class="col-amp">${s.amp != null ? s.amp + '%' : '--'}</td>
+      <td><div class="industry">${s.industry || ''}</div></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('capital-content').innerHTML = topVolume.length
+    ? `<table class="top-volume-table">
+        <thead><tr>
+          <th>股票</th><th>涨幅</th><th>成交额</th><th>主力净额</th>
+          <th class="col-hsl">换手</th><th class="col-amp">振幅</th><th>行业</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>`
+    : '<div class="empty">暂无数据（盘前/休市时段或抓取失败）</div>';
+}
+
+renderCapital();
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.pane;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + target));
+  });
+});
 </script>
 </body>
 </html>

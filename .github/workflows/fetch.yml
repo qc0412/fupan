@@ -39,6 +39,9 @@ jobs:
               updated_at=d["updated_at"],
               data=d["data"],
               trading_days=d["trading_days"],
+              jjyd=d.get("jjyd", []),
+              top_volume=d.get("top_volume", []),
+              capital_signals=d.get("capital_signals", {}),
           )
           with open("index.html", "w", encoding="utf-8") as f:
               f.write(html)

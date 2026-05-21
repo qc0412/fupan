@@ -3,27 +3,31 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多次上龙虎榜个股</title>
+<title>短线龙头复盘</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f0f2f5; color: #1a1a1a; min-height: 100vh; }
 
-  .header { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); padding: 20px 24px 16px; color: #fff; }
-  .header h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 4px; }
-  .header .meta { font-size: 0.78rem; opacity: 0.75; }
+  .main { max-width: 960px; margin: 16px auto; padding: 0 12px 32px; }
 
-  .main { max-width: 960px; margin: 20px auto; padding: 0 16px; }
+  .tabs { display: flex; align-items: center; background: #fff; border-radius: 999px; padding: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 14px; }
+  .tab { flex: 1; text-align: center; padding: 10px 14px; font-size: 0.95rem; font-weight: 500; color: #666; border-radius: 999px; cursor: pointer; transition: all .2s; user-select: none; }
+  .tab.active { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); color: #fff; box-shadow: 0 2px 8px rgba(231,76,60,.3); }
+  .tab:hover:not(.active) { color: #1a1a1a; }
+
+  .meta { text-align: right; font-size: 0.72rem; color: #aaa; padding: 0 4px 10px; }
 
   .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+  .pane { display: none; }
+  .pane.active { display: block; }
 
-  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; }
-  .card-title { font-size: 0.95rem; font-weight: 600; color: #1a1a1a; display: flex; align-items: center; gap: 6px; }
-  .card-title::before { content: ''; display: inline-block; width: 4px; height: 16px; background: #e74c3c; border-radius: 2px; }
-
-  .filters { display: flex; gap: 6px; padding: 12px 18px; border-bottom: 1px solid #f0f0f0; }
+  .filters { display: flex; gap: 6px; padding: 14px 18px; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; align-items: center; }
   .filter-btn { padding: 4px 14px; border-radius: 20px; border: 1px solid #e0e0e0; background: #fff; color: #666; cursor: pointer; font-size: 0.82rem; transition: all .15s; }
   .filter-btn.active { border-color: #e74c3c; color: #e74c3c; background: #fff5f5; font-weight: 500; }
   .filter-btn:hover:not(.active) { border-color: #ccc; color: #333; }
+  .filter-sep { width: 100%; height: 0; }
+  .filter-label { font-size: 0.78rem; color: #aaa; margin-right: 4px; }
+  .sort-btn.active { border-color: #e67e22; color: #e67e22; background: #fff8f0; }
 
   .dates { font-size: 0.78rem; color: #999; padding: 8px 18px; background: #fafafa; border-bottom: 1px solid #f0f0f0; }
 
@@ -47,27 +51,114 @@
   .zf-zero { color: #999; }
 
   .empty { text-align: center; padding: 60px; color: #bbb; font-size: 0.9rem; }
+
+  .jjyd-table td { padding: 10px 14px; font-size: 0.85rem; }
+  .jjyd-table th { padding: 10px 14px; }
+  .jjyd-table .money-up { color: #e74c3c; font-weight: 600; }
+  .jjyd-table .money-down { color: #27ae60; font-weight: 600; }
+  .jjyd-table .ban-tag { display: inline-block; background: #fff0e0; color: #d35400; font-size: 0.75rem; padding: 2px 7px; border-radius: 4px; font-weight: 500; white-space: nowrap; margin-top: 4px; }
+  .jjyd-table .ban-tag.first { background: #e8f4ff; color: #2980b9; }
+  .jjyd-table .ban-tag.lianban { background: #ffe8e8; color: #c0392b; }
+  .jjyd-table .concept { color: #666; font-size: 0.78rem; line-height: 1.4; }
+  .jjyd-table .pair { font-size: 0.78rem; color: #888; }
+  .jjyd-table .pair .v1 { color: #1a1a1a; font-weight: 600; font-size: 0.85rem; }
+  .jjyd-table .pct-jj { color: #f39c12; font-weight: 600; font-size: 0.82rem; }
+
+  /* 大资金情绪 */
+  .capital-hero { padding: 24px 20px; display: flex; align-items: center; gap: 24px; background: linear-gradient(180deg, #fafbfc 0%, #fff 100%); border-bottom: 1px solid #f0f0f0; }
+  .temp-gauge { position: relative; width: 110px; height: 110px; flex-shrink: 0; }
+  .temp-gauge svg { transform: rotate(-90deg); }
+  .temp-gauge .temp-num { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .temp-gauge .temp-num .v { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+  .temp-gauge .temp-num .l { font-size: 0.7rem; color: #999; margin-top: 4px; }
+  .capital-stats { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .capital-stats .stat { display: flex; flex-direction: column; gap: 2px; }
+  .capital-stats .stat .label { font-size: 0.72rem; color: #999; }
+  .capital-stats .stat .val { font-size: 0.95rem; font-weight: 600; color: #1a1a1a; }
+  .signals { padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #f0f0f0; background: #fafafa; }
+  .signal { padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+  .signal.warn { background: #fff0f0; color: #c0392b; border: 1px solid #ffe0e0; }
+  .signal.ok { background: #ecfdf5; color: #16a34a; border: 1px solid #d1fae5; }
+  .signal.neutral { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+  .signal .tip { color: #999; font-weight: 400; font-size: 0.7rem; margin-left: 2px; }
+  .top-volume-table .industry { font-size: 0.78rem; color: #888; }
+  .top-volume-table .rank { color: #bbb; font-size: 0.78rem; margin-right: 6px; }
+
+  @media (max-width: 640px) {
+    .tab { padding: 9px 8px; font-size: 0.9rem; }
+    th, td { padding: 10px 12px; }
+    .jjyd-table th, .jjyd-table td { padding: 8px 10px; }
+    .jjyd-table .col-ltsz, .jjyd-table .col-fd { display: none; }
+    .capital-hero { flex-direction: column; gap: 16px; padding: 18px 16px; }
+    .capital-stats { width: 100%; }
+    .top-volume-table .col-amp, .top-volume-table .col-hsl { display: none; }
+  }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>多次上龙虎榜个股</h1>
-  <div class="meta">更新时间：2026-05-20 12:16:59</div>
-</div>
-
 <div class="main">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">上榜统计</div>
+  <div class="tabs">
+    <div class="tab active" data-pane="lhb">多次上榜</div>
+    <div class="tab" data-pane="jjyd">竞价异动</div>
+    <div class="tab" data-pane="capital">大资金情绪</div>
+  </div>
+  <div class="meta">更新时间：2026-05-21 10:43:54</div>
+
+  <div class="pane active" id="pane-lhb">
+    <div class="card">
+      <div class="filters">
+        <button class="filter-btn lhb-btn active" data-days="3">近3交易日</button>
+        <button class="filter-btn lhb-btn" data-days="7">近7交易日</button>
+        <button class="filter-btn lhb-btn" data-days="10">近10交易日</button>
+      </div>
+      <div class="dates" id="dates"></div>
+      <div id="content"></div>
     </div>
-    <div class="filters">
-      <button class="filter-btn active" data-days="3">近3交易日</button>
-      <button class="filter-btn" data-days="7">近7交易日</button>
-      <button class="filter-btn" data-days="10">近10交易日</button>
+  </div>
+
+  <div class="pane" id="pane-capital">
+    <div class="card">
+      <div class="capital-hero">
+        <div class="temp-gauge">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <circle cx="55" cy="55" r="48" fill="none" stroke="#f0f0f0" stroke-width="9"/>
+            <circle id="temp-arc" cx="55" cy="55" r="48" fill="none" stroke="#e74c3c" stroke-width="9" stroke-linecap="round" stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
+          </svg>
+          <div class="temp-num">
+            <div class="v" id="temp-value">--</div>
+            <div class="l">情绪温度</div>
+          </div>
+        </div>
+        <div class="capital-stats">
+          <div class="stat"><span class="label">红绿比</span><span class="val" id="cap-rg">--</span></div>
+          <div class="stat"><span class="label">平均涨幅</span><span class="val" id="cap-avg">--</span></div>
+          <div class="stat"><span class="label">合计成交</span><span class="val" id="cap-turn">--</span></div>
+          <div class="stat"><span class="label">主力净额</span><span class="val" id="cap-zhuli">--</span></div>
+        </div>
+      </div>
+      <div class="signals" id="cap-signals"></div>
+      <div id="capital-content"></div>
     </div>
-    <div class="dates" id="dates"></div>
-    <div id="content"></div>
+  </div>
+
+  <div class="pane" id="pane-jjyd">
+    <div class="card">
+      <div class="filters">
+        <button class="filter-btn jjyd-btn active" data-mode="all">全部</button>
+        <button class="filter-btn jjyd-btn" data-mode="lianban">仅连板</button>
+        <button class="filter-btn jjyd-btn" data-mode="shouban">仅首板</button>
+        <div class="filter-sep"></div>
+        <span class="filter-label">排序</span>
+        <button class="filter-btn sort-btn active" data-sort="zhuli">主力净额</button>
+        <button class="filter-btn sort-btn" data-sort="weimai">委买</button>
+        <button class="filter-btn sort-btn" data-sort="cuohe">撮合</button>
+        <button class="filter-btn sort-btn" data-sort="jjzf">竞价涨幅</button>
+        <button class="filter-btn sort-btn" data-sort="fengdan">封单</button>
+      </div>
+      <div class="dates" id="jjyd-summary"></div>
+      <div id="jjyd-content"></div>
+    </div>
   </div>
 </div>
 
@@ -120,9 +211,9 @@ function render() {
   </table>`;
 }
 
-document.querySelectorAll('.filter-btn').forEach(btn => {
+document.querySelectorAll('.lhb-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.lhb-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     activeDays = parseInt(btn.dataset.days);
     render();
@@ -130,6 +221,212 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 });
 
 render();
+
+// 竞价异动
+const jjydRaw = [{"ban": "\u9996\u677f", "code": "000725", "concept": "\u9762\u677f\u3001\u73bb\u7483\u57fa\u677f", "cuohe": 566414592, "fengdan": 752445, "jjzf": 10.09, "ltsz": 150108624071, "name": "\u4eac\u4e1c\u65b9\uff21", "weimai": 10830464106, "zf": 10.09, "zhuli": 301046431}, {"ban": "10\u59298\u677f", "code": "603779", "concept": "\u5b9e\u63a7\u4eba\u53d8\u66f4\u3001\u767d\u9152", "cuohe": 65741914, "fengdan": 58071, "jjzf": 10, "ltsz": 3217614891, "name": "\u5a01\u9f99\u80a1\u4efd", "weimai": 1974227771, "zf": 10, "zhuli": 12263299}, {"ban": "\u9996\u677f", "code": "300323", "concept": "Mini/Micro\u3001\u9762\u677f", "cuohe": 174825380, "fengdan": 57288, "jjzf": 20, "ltsz": 18232454588, "name": "\u534e\u707f\u5149\u7535", "weimai": 1765269360, "zf": 20, "zhuli": 59934312}, {"ban": "\u9996\u677f", "code": "600707", "concept": "\u73bb\u7483\u57fa\u677f\u3001\u9762\u677f", "cuohe": 104197846, "fengdan": 47423, "jjzf": 10.01, "ltsz": 14815852597, "name": "\u5f69\u8679\u80a1\u4efd", "weimai": 988170362, "zf": 10.01, "zhuli": 71861253}, {"ban": "2\u8fde\u677f", "code": "300069", "concept": "\u5e76\u8d2d\u91cd\u7ec4\u3001\u667a\u80fd\u7535\u7f51", "cuohe": 2859494, "fengdan": 55147, "jjzf": 19.99, "ltsz": 2927020356, "name": "\u91d1\u5229\u534e\u7535", "weimai": 867086142, "zf": 19.99, "zhuli": 2418894}, {"ban": "4\u8fde\u677f", "code": "000417", "concept": "\u82af\u7247\u3001\u5e73\u53f0\u7ecf\u6d4e", "cuohe": 41101763, "fengdan": 47055, "jjzf": 9.97, "ltsz": 5057726661, "name": "\u5408\u767e\u96c6\u56e2", "weimai": 631998584, "zf": 9.97, "zhuli": 22508157}, {"ban": "\u9996\u677f", "code": "002962", "concept": "\u73bb\u7483\u57fa\u677f\u3001\u7aef\u4fa7AI", "cuohe": 19714678, "fengdan": 21189, "jjzf": 10.02, "ltsz": 3623821492, "name": "\u4e94\u65b9\u5149\u7535", "weimai": 397826199, "zf": 10.02, "zhuli": 15236612}, {"ban": "", "code": "000100", "concept": "Mini/Micro\u3001\u9762\u677f", "cuohe": 254247410, "fengdan": null, "jjzf": 7.8, "ltsz": 83062821012, "name": "TCL\u79d1\u6280", "weimai": 113360955, "zf": 6.15, "zhuli": 128069382}, {"ban": "\u66284\u8fde\u677f", "code": "002421", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u7b97\u529b", "cuohe": 174874285, "fengdan": null, "jjzf": 2.58, "ltsz": 6991033109, "name": "\u8fbe\u5b9e\u667a\u80fd", "weimai": 110394177, "zf": -3.75, "zhuli": -1216221}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000809", "concept": "\u5b9e\u63a7\u4eba\u53d8\u66f4\u3001\u7535\u529b", "cuohe": 66520425, "fengdan": null, "jjzf": 8.7, "ltsz": 2276275506, "name": "\u548c\u5c55\u80fd\u6e90", "weimai": 65574249, "zf": -3.89, "zhuli": -33468025}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002407", "concept": "\u6c22\u6c1f\u9178\u3001\u7535\u89e3\u6db2", "cuohe": 146536181, "fengdan": null, "jjzf": 2.46, "ltsz": 42850661632, "name": "\u591a\u6c1f\u591a", "weimai": 37786180, "zf": 4.06, "zhuli": -24446101}, {"ban": "", "code": "002156", "concept": "\u5b58\u50a8\u3001\u5148\u8fdb\u5c01\u88c5", "cuohe": 220531200, "fengdan": null, "jjzf": 2.76, "ltsz": 73997170654, "name": "\u901a\u5bcc\u5fae\u7535", "weimai": 37241541, "zf": 4.08, "zhuli": -44441600}, {"ban": "", "code": "000813", "concept": "\u533b\u836f\u3001\u51cf\u80a5\u836f", "cuohe": 34001550, "fengdan": null, "jjzf": 6.38, "ltsz": 4743664916, "name": "\u5fb7\u5c55\u5065\u5eb7", "weimai": 34835940, "zf": -9.93, "zhuli": -102150}, {"ban": "", "code": "002629", "concept": "\u77f3\u6cb9\u77f3\u5316\u3001\u7535\u529b", "cuohe": 33755940, "fengdan": -7445, "jjzf": 4.96, "ltsz": 2355658725, "name": "\u4ec1\u667a\u80a1\u4efd", "weimai": 34544493, "zf": -10.05, "zhuli": -6692496}, {"ban": "", "code": "000066", "concept": "CPU\u3001\u667a\u80fd\u9a7e\u9a76", "cuohe": 247087442, "fengdan": null, "jjzf": 6.21, "ltsz": 41365268461, "name": "\u4e2d\u56fd\u957f\u57ce", "weimai": 34020542, "zf": 3.18, "zhuli": 117246694}, {"ban": "", "code": "300308", "concept": "\u5149\u6a21\u5757\u3001OCS\u4ea4\u6362\u673a", "cuohe": 200022000, "fengdan": null, "jjzf": 2.22, "ltsz": 850247700982, "name": "\u4e2d\u9645\u65ed\u521b", "weimai": 30985560, "zf": -0.47, "zhuli": 31274240}, {"ban": "\u9996\u677f", "code": "000536", "concept": "\u9762\u677f\u3001\u73bb\u7483\u57fa\u677f", "cuohe": 28719656, "fengdan": 44944, "jjzf": 9.74, "ltsz": 6953335834, "name": "\u534e\u6620\u79d1\u6280", "weimai": 28459431, "zf": 10, "zhuli": 7326491}, {"ban": "", "code": "002429", "concept": "\u5149\u6a21\u5757\u3001AI\u5e94\u7528", "cuohe": 87987420, "fengdan": null, "jjzf": 3.29, "ltsz": 27156456115, "name": "\u5146\u9a70\u80a1\u4efd", "weimai": 25263420, "zf": -2.4, "zhuli": -3618368}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002654", "concept": "\u5b58\u50a8\u3001\u6587\u5316\u4f20\u5a92", "cuohe": 123801480, "fengdan": null, "jjzf": 2.7, "ltsz": 12343575562, "name": "\u4e07\u6da6\u79d1\u6280", "weimai": 24955488, "zf": -0.57, "zhuli": 17120892}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "301322", "concept": "\u5e76\u8d2d\u91cd\u7ec4\u3001\u6c7d\u8f66\u7c7b", "cuohe": 33995800, "fengdan": null, "jjzf": 9.02, "ltsz": 4939779414, "name": "\u7eff\u901a\u79d1\u6280", "weimai": 24449486, "zf": 5.49, "zhuli": -13044900}, {"ban": "", "code": "300476", "concept": "\u5370\u5236\u7535\u8def\u677f\u3001\u901a\u4fe1", "cuohe": 192133890, "fengdan": null, "jjzf": 2.33, "ltsz": 205119119767, "name": "\u80dc\u5b8f\u79d1\u6280", "weimai": 24022149, "zf": 2.47, "zhuli": 3007890}, {"ban": "\u66283\u8fde\u677f", "code": "002272", "concept": "\u6db2\u51b7\u3001\u7b97\u529b", "cuohe": 73109029, "fengdan": null, "jjzf": -1.52, "ltsz": 8152635762, "name": "\u5ddd\u6da6\u80a1\u4efd", "weimai": 22831975, "zf": -5.37, "zhuli": -3189159}, {"ban": "", "code": "000988", "concept": "\u5149\u6a21\u5757\u3001\u5149\u82af\u7247", "cuohe": 158507136, "fengdan": null, "jjzf": 0.36, "ltsz": 132118397266, "name": "\u534e\u5de5\u79d1\u6280", "weimai": 22739637, "zf": -0.65, "zhuli": -2755405}, {"ban": "", "code": "300776", "concept": "\u73bb\u7483\u57fa\u677f\u3001\u5f02\u8d28\u7ed3\u7535\u6c60", "cuohe": 77734800, "fengdan": null, "jjzf": 8.52, "ltsz": 20833814335, "name": "\u5e1d\u5c14\u6fc0\u5149", "weimai": 21942000, "zf": 10.44, "zhuli": -18408000}, {"ban": "", "code": "002008", "concept": "PCB\u8bbe\u5907\u3001\u73bb\u7483\u57fa\u677f", "cuohe": 127125531, "fengdan": null, "jjzf": 1.57, "ltsz": 117266131658, "name": "\u5927\u65cf\u6fc0\u5149", "weimai": 21512990, "zf": 3.96, "zhuli": -9353718}, {"ban": "", "code": "300136", "concept": "\u5546\u4e1a\u822a\u5929\u3001\u6ee4\u6ce2\u5668", "cuohe": 170685257, "fengdan": null, "jjzf": 0.53, "ltsz": 88383995715, "name": "\u4fe1\u7ef4\u901a\u4fe1", "weimai": 21175890, "zf": -0.17, "zhuli": -50036400}, {"ban": "\u9996\u677f", "code": "002290", "concept": "CPU\u3001AI\u653f\u52a1", "cuohe": 37135140, "fengdan": 21132, "jjzf": 5.78, "ltsz": 13765363226, "name": "\u79be\u76db\u65b0\u6750", "weimai": 20904345, "zf": 10, "zhuli": -1879248}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002796", "concept": "\u5149\u6a21\u5757\u3001\u901a\u4fe1", "cuohe": 41610114, "fengdan": null, "jjzf": 4.9, "ltsz": 8625855425, "name": "\u4e16\u5609\u79d1\u6280", "weimai": 19852732, "zf": 3.57, "zhuli": 5848554}, {"ban": "", "code": "300782", "concept": "\u6a21\u62df\u82af\u7247\u3001\u5546\u4e1a\u822a\u5929", "cuohe": 53638900, "fengdan": null, "jjzf": 2.31, "ltsz": 41470585734, "name": "\u5353\u80dc\u5fae", "weimai": 19531200, "zf": 1.44, "zhuli": 14084700}, {"ban": "", "code": "002047", "concept": "\u80a1\u6743\u8f6c\u8ba9\u3001\u5143\u5b87\u5b99", "cuohe": 25266450, "fengdan": null, "jjzf": 1.66, "ltsz": 5626321780, "name": "\u5b9d\u9e70\u80a1\u4efd", "weimai": 18965610, "zf": 0.92, "zhuli": -10750300}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000880", "concept": "\u67f4\u6cb9\u53d1\u7535\u673a\u3001\u4e1a\u7ee9\u589e\u957f", "cuohe": 45380500, "fengdan": null, "jjzf": 4.46, "ltsz": 7834694868, "name": "\u6f4d\u67f4\u91cd\u673a", "weimai": 17820304, "zf": -2.63, "zhuli": 9153800}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000859", "concept": "\u5149\u523b\u80f6\u3001\u9762\u677f", "cuohe": 39869069, "fengdan": null, "jjzf": 0.66, "ltsz": 6852960171, "name": "\u56fd\u98ce\u65b0\u6750", "weimai": 17395476, "zf": 2.47, "zhuli": -14248850}, {"ban": "", "code": "002208", "concept": "\u5b58\u50a8\u3001\u8682\u8681\u6982\u5ff5", "cuohe": 83163150, "fengdan": null, "jjzf": -1.47, "ltsz": 7829581977, "name": "\u5408\u80a5\u57ce\u5efa", "weimai": 17204421, "zf": -7.26, "zhuli": 8351250}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002442", "concept": "\u7164\u5316\u5de5\u3001\u5316\u5de5", "cuohe": 19260362, "fengdan": null, "jjzf": 1.79, "ltsz": 2622070102, "name": "\u9f99\u661f\u79d1\u6280", "weimai": 16914150, "zf": 5.22, "zhuli": -4087221}, {"ban": "", "code": "002281", "concept": "\u5149\u6a21\u5757\u3001\u5149\u82af\u7247", "cuohe": 201887580, "fengdan": null, "jjzf": -2.64, "ltsz": 105995920303, "name": "\u5149\u8fc5\u79d1\u6280", "weimai": 16226496, "zf": -4.74, "zhuli": -39263595}, {"ban": "", "code": "002342", "concept": "\u5546\u4e1a\u822a\u5929\u3001\u6d77\u6d0b\u7ecf\u6d4e", "cuohe": 95075596, "fengdan": null, "jjzf": -6.97, "ltsz": 9686628428, "name": "\u5de8\u529b\u7d22\u5177", "weimai": 15930969, "zf": -7.6, "zhuli": -13177589}, {"ban": "", "code": "002759", "concept": "\u7535\u89e3\u6db2\u3001\u4e1a\u7ee9\u589e\u957f", "cuohe": 46980840, "fengdan": null, "jjzf": 3.78, "ltsz": 15633479140, "name": "\u5929\u9645\u80a1\u4efd", "weimai": 15268535, "zf": 4.74, "zhuli": 8777605}, {"ban": "", "code": "002929", "concept": "\u7b97\u529b\u3001\u6570\u5b57\u7ecf\u6d4e", "cuohe": 65922252, "fengdan": null, "jjzf": -0.55, "ltsz": 13688262141, "name": "\u6da6\u5efa\u80a1\u4efd", "weimai": 14829650, "zf": -3.2, "zhuli": 6220484}, {"ban": "", "code": "002384", "concept": "\u5149\u82af\u7247\u3001\u82f9\u679c\u6982\u5ff5", "cuohe": 200259633, "fengdan": null, "jjzf": 0.1, "ltsz": 265191603464, "name": "\u4e1c\u5c71\u7cbe\u5bc6", "weimai": 14791449, "zf": -2.64, "zhuli": 20916672}, {"ban": "", "code": "300657", "concept": "\u7b97\u529b\u3001\u5370\u5236\u7535\u8def\u677f", "cuohe": 196661652, "fengdan": null, "jjzf": 1.05, "ltsz": 19861335108, "name": "\u5f18\u4fe1\u7535\u5b50", "weimai": 14179680, "zf": 0.37, "zhuli": 41988342}, {"ban": "", "code": "301308", "concept": "\u5b58\u50a8\u3001\u6570\u5b57\u82af\u7247", "cuohe": 191296860, "fengdan": null, "jjzf": 2.08, "ltsz": 129817734521, "name": "\u6c5f\u6ce2\u9f99", "weimai": 13853160, "zf": 0.25, "zhuli": -41184531}, {"ban": "", "code": "301217", "concept": "PCB\u94dc\u7b94\u3001\u901a\u4fe1", "cuohe": 30128652, "fengdan": null, "jjzf": 2.27, "ltsz": 20607668392, "name": "\u94dc\u51a0\u94dc\u7b94", "weimai": 13779471, "zf": 2.3, "zhuli": 5858349}, {"ban": "", "code": "300303", "concept": "Mini/Micro\u3001\u901a\u4fe1", "cuohe": 45424468, "fengdan": null, "jjzf": 6.6, "ltsz": 12101606773, "name": "\u805a\u98de\u5149\u7535", "weimai": 12701136, "zf": 1.36, "zhuli": 212110}, {"ban": "", "code": "002371", "concept": "\u534a\u5bfc\u4f53\u8bbe\u5907\u3001\u9762\u677f", "cuohe": 76027884, "fengdan": null, "jjzf": 0.12, "ltsz": 309131919807, "name": "\u5317\u65b9\u534e\u521b", "weimai": 12700160, "zf": 9.33, "zhuli": 1182239}, {"ban": "", "code": "002428", "concept": "\u78f7\u5316\u94df\u3001\u91d1\u5c5e\u9517", "cuohe": 152329353, "fengdan": null, "jjzf": 1.69, "ltsz": 46641809809, "name": "\u4e91\u5357\u9517\u4e1a", "weimai": 12662650, "zf": -1.9, "zhuli": 76224427}, {"ban": "", "code": "301021", "concept": "\u82af\u7247\u3001\u9762\u677f", "cuohe": 34128554, "fengdan": null, "jjzf": 4.07, "ltsz": 8175589021, "name": "\u82f1\u8bfa\u6fc0\u5149", "weimai": 12572795, "zf": 2.28, "zhuli": -3048181}, {"ban": "", "code": "300394", "concept": "CPO/MPO\u3001\u82f1\u4f1f\u8fbe\u6982\u5ff5", "cuohe": 98575573, "fengdan": null, "jjzf": 0.34, "ltsz": 153518314830, "name": "\u5929\u5b5a\u901a\u4fe1", "weimai": 12406680, "zf": -0.85, "zhuli": -9704146}, {"ban": "", "code": "000636", "concept": "\u7535\u963b\u7535\u5bb9\u3001\u5143\u5668\u4ef6", "cuohe": 64174748, "fengdan": null, "jjzf": 2.56, "ltsz": 31234324461, "name": "\u98ce\u534e\u9ad8\u79d1", "weimai": 11941716, "zf": 3.91, "zhuli": 31170296}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "301013", "concept": "\u5b58\u50a8\u3001\u82af\u7247", "cuohe": 63089952, "fengdan": null, "jjzf": -5.97, "ltsz": 6234723970, "name": "\u5229\u548c\u5174", "weimai": 11618526, "zf": -0.22, "zhuli": 4988321}, {"ban": "", "code": "002409", "concept": "\u5b58\u50a8\u3001\u5927\u57fa\u91d1\u4e8c\u671f", "cuohe": 87273303, "fengdan": null, "jjzf": 1.8, "ltsz": 32220114324, "name": "\u96c5\u514b\u79d1\u6280", "weimai": 11617510, "zf": 0.49, "zhuli": -29124441}, {"ban": "", "code": "001309", "concept": "\u5b58\u50a8\u3001\u65e0\u4eba\u9a7e\u9a76", "cuohe": 140693000, "fengdan": null, "jjzf": 1.59, "ltsz": 97895259287, "name": "\u5fb7\u660e\u5229", "weimai": 11559956, "zf": -0.6, "zhuli": -17887100}, {"ban": "", "code": "002185", "concept": "\u5148\u8fdb\u5c01\u88c5\u3001\u73bb\u7483\u57fa\u677f", "cuohe": 101492800, "fengdan": null, "jjzf": 0.76, "ltsz": 40615624180, "name": "\u534e\u5929\u79d1\u6280", "weimai": 11528203, "zf": 0.76, "zhuli": -49843200}, {"ban": "", "code": "002050", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u6c7d\u8f66\u70ed\u7ba1\u7406", "cuohe": 42823638, "fengdan": null, "jjzf": 1.07, "ltsz": 109424446716, "name": "\u4e09\u82b1\u667a\u63a7", "weimai": 11483372, "zf": 4.33, "zhuli": 6580685}, {"ban": "", "code": "300863", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u6c7d\u8f66\u7c7b", "cuohe": 33636370, "fengdan": null, "jjzf": 5.32, "ltsz": 6363250740, "name": "\u5361\u500d\u4ebf", "weimai": 11203200, "zf": 2.34, "zhuli": 7458091}, {"ban": "", "code": "002709", "concept": "\u56fa\u6001\u7535\u6c60\u3001\u7535\u89e3\u6db2", "cuohe": 69177246, "fengdan": null, "jjzf": 0.03, "ltsz": 79504650899, "name": "\u5929\u8d50\u6750\u6599", "weimai": 11190520, "zf": 2.71, "zhuli": -20306995}, {"ban": "", "code": "300302", "concept": "\u5b58\u50a8\u3001\u81ea\u4e3b\u53ef\u63a7", "cuohe": 51749920, "fengdan": null, "jjzf": 2.51, "ltsz": 17783486092, "name": "\u540c\u6709\u79d1\u6280", "weimai": 10567598, "zf": 0.73, "zhuli": -7161391}, {"ban": "", "code": "000021", "concept": "\u5b58\u50a8\u3001\u6c7d\u8f66\u7c7b", "cuohe": 105429388, "fengdan": null, "jjzf": 1.56, "ltsz": 39831565181, "name": "\u6df1\u79d1\u6280", "weimai": 10539084, "zf": 1.56, "zhuli": 46460762}, {"ban": "\u9996\u677f", "code": "002938", "concept": "\u5370\u5236\u7535\u8def\u677f\u3001\u901a\u4fe1", "cuohe": 53474637, "fengdan": 74802, "jjzf": 5.11, "ltsz": 63783063049, "name": "\u9e4f\u9f0e\u63a7\u80a1", "weimai": 10509516, "zf": 10, "zhuli": 25215279}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "001269", "concept": "\u5149\u4f0f\u3001\u77f3\u82f1\u5769\u57da", "cuohe": 11322062, "fengdan": null, "jjzf": 3.96, "ltsz": 1521227656, "name": "\u6b27\u6676\u79d1\u6280", "weimai": 10376947, "zf": 4.21, "zhuli": -4374027}, {"ban": "", "code": "300502", "concept": "CPO/MPO\u3001\u4e1a\u7ee9\u589e\u957f", "cuohe": 132256584, "fengdan": null, "jjzf": 0.06, "ltsz": 501411101530, "name": "\u65b0\u6613\u76db", "weimai": 10018952, "zf": 0.02, "zhuli": -1411986}, {"ban": "9\u8fde\u677f", "code": "001259", "concept": "\u80a1\u6743\u8f6c\u8ba9\u3001\u5e73\u53f0\u7ecf\u6d4e", "cuohe": 20970900, "fengdan": 6852, "jjzf": 0.58, "ltsz": 2135647451, "name": "\u5229\u4ec1\u79d1\u6280", "weimai": 9965094, "zf": 10, "zhuli": 6277500}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "301020", "concept": "\u6c7d\u8f66\u96f6\u90e8\u4ef6\u3001\u4e1a\u7ee9\u589e\u957f", "cuohe": 17418240, "fengdan": null, "jjzf": 4.48, "ltsz": 1757670787, "name": "\u5bc6\u5c01\u79d1\u6280", "weimai": 9905302, "zf": 0.52, "zhuli": 1535765}, {"ban": "", "code": "301396", "concept": "\u7b97\u529b\u3001\u4fe1\u521b", "cuohe": 19535084, "fengdan": null, "jjzf": -1.03, "ltsz": 23707898444, "name": "\u5b8f\u666f\u79d1\u6280", "weimai": 9273359, "zf": -3.54, "zhuli": -1051644}, {"ban": "", "code": "002387", "concept": "\u5b9e\u63a7\u4eba\u53d8\u66f4\u3001\u534e\u4e3a\u6982\u5ff5", "cuohe": 24227840, "fengdan": null, "jjzf": 4.48, "ltsz": 7493516990, "name": "\u7ef4\u4fe1\u8bfa", "weimai": 8617210, "zf": 3.21, "zhuli": 3049855}, {"ban": "", "code": "002436", "concept": "\u5370\u5236\u7535\u8def\u677f\u3001HBM", "cuohe": 97168734, "fengdan": null, "jjzf": 0, "ltsz": 51383302119, "name": "\u5174\u68ee\u79d1\u6280", "weimai": 8573236, "zf": 4.92, "zhuli": -27559818}, {"ban": "", "code": "002258", "concept": "\u519c\u836f\u3001\u5e74\u62a5\u9884\u589e", "cuohe": 15658240, "fengdan": null, "jjzf": 6.22, "ltsz": 5802925693, "name": "\u5229\u5c14\u5316\u5b66", "weimai": 8345752, "zf": 1.74, "zhuli": 7267061}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000518", "concept": "\u75c5\u6bd2\u9632\u6cbb\u3001\u533b\u7597\u5668\u68b0", "cuohe": 17819550, "fengdan": null, "jjzf": 2.64, "ltsz": 2376481358, "name": "\u56db\u73af\u751f\u7269", "weimai": 8248875, "zf": 4.4, "zhuli": -3932600}, {"ban": "", "code": "300604", "concept": "\u5b58\u50a8\u3001\u82af\u7247", "cuohe": 80934800, "fengdan": null, "jjzf": 1.01, "ltsz": 112578625838, "name": "\u957f\u5ddd\u79d1\u6280", "weimai": 8203321, "zf": 4.11, "zhuli": -8613200}, {"ban": "", "code": "002463", "concept": "\u5370\u5236\u7535\u8def\u677f\u3001\u901a\u4fe1", "cuohe": 50139942, "fengdan": null, "jjzf": 1.93, "ltsz": 141814203151, "name": "\u6caa\u7535\u80a1\u4efd", "weimai": 8021278, "zf": 4.19, "zhuli": 2217175}, {"ban": "", "code": "002273", "concept": "\u7aef\u4fa7AI\u3001\u73bb\u7483\u57fa\u677f", "cuohe": 73932430, "fengdan": null, "jjzf": 0.18, "ltsz": 48094230246, "name": "\u6c34\u6676\u5149\u7535", "weimai": 7956623, "zf": -2.14, "zhuli": -14122327}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002158", "concept": "\u534a\u5bfc\u4f53\u8bbe\u5907\u3001\u538b\u7f29\u673a", "cuohe": 23986110, "fengdan": null, "jjzf": 1.11, "ltsz": 7261202060, "name": "\u6c49\u949f\u7cbe\u673a", "weimai": 7773518, "zf": 0.77, "zhuli": -2419869}, {"ban": "", "code": "301511", "concept": "PCB\u94dc\u7b94\u3001\u901a\u4fe1", "cuohe": 40234342, "fengdan": null, "jjzf": 0.36, "ltsz": 37175389576, "name": "\u5fb7\u798f\u79d1\u6280", "weimai": 7509792, "zf": -3.19, "zhuli": 5961458}, {"ban": "", "code": "002222", "concept": "\u901a\u4fe1\u3001\u65e0\u4eba\u9a7e\u9a76", "cuohe": 34419042, "fengdan": null, "jjzf": 0.82, "ltsz": 40393532934, "name": "\u798f\u6676\u79d1\u6280", "weimai": 7396185, "zf": -1.86, "zhuli": -9307746}, {"ban": "", "code": "300672", "concept": "\u5b58\u50a8\u3001\u65e0\u4eba\u9a7e\u9a76", "cuohe": 23948106, "fengdan": null, "jjzf": 0.83, "ltsz": 41655998363, "name": "\u56fd\u79d1\u5fae", "weimai": 7085825, "zf": 5.28, "zhuli": 3337251}, {"ban": "", "code": "301188", "concept": "\u533b\u7597\u5668\u68b0\u3001\u73bb\u7483", "cuohe": 29199808, "fengdan": null, "jjzf": 8.26, "ltsz": 9328413184, "name": "\u529b\u8bfa\u836f\u5305", "weimai": 6998606, "zf": 16.59, "zhuli": 2418764}, {"ban": "", "code": "002081", "concept": "\u6d01\u51c0\u5ba4\u3001\u5730\u4ea7\u94fe", "cuohe": 52393662, "fengdan": null, "jjzf": -1.45, "ltsz": 8068062467, "name": "\u91d1\u87b3\u8782", "weimai": 6959770, "zf": -2.9, "zhuli": 16584510}, {"ban": "", "code": "300632", "concept": "\u5149\u6a21\u5757\u3001\u901a\u4fe1", "cuohe": 39481799, "fengdan": null, "jjzf": 3.05, "ltsz": 7652079391, "name": "\u5149\u8386\u80a1\u4efd", "weimai": 6897974, "zf": -2.57, "zhuli": -3073167}, {"ban": "", "code": "300088", "concept": "\u7b97\u529b\u3001\u667a\u80fd\u5ea7\u8231", "cuohe": 29659561, "fengdan": null, "jjzf": 9.54, "ltsz": 16406373816, "name": "\u957f\u4fe1\u79d1\u6280", "weimai": 6816832, "zf": 5.56, "zhuli": 14993946}, {"ban": "", "code": "300433", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u7b97\u529b", "cuohe": 63584034, "fengdan": null, "jjzf": 1.87, "ltsz": 71234661140, "name": "\u84dd\u601d\u79d1\u6280", "weimai": 6701066, "zf": 4.46, "zhuli": -6177348}, {"ban": "\u66282\u8fde\u677f", "code": "002782", "concept": "\u56fa\u6001\u53d8\u538b\u5668\u3001\u6c7d\u8f66\u7c7b", "cuohe": 38089656, "fengdan": null, "jjzf": 0.03, "ltsz": 5858879463, "name": "\u53ef\u7acb\u514b", "weimai": 6394185, "zf": -4.22, "zhuli": 18067238}, {"ban": "", "code": "300408", "concept": "SOFC\u7535\u6c60\u3001\u901a\u4fe1", "cuohe": 18427087, "fengdan": null, "jjzf": 3.16, "ltsz": 123795781192, "name": "\u4e09\u73af\u96c6\u56e2", "weimai": 6321697, "zf": 6.52, "zhuli": 7250912}, {"ban": "", "code": "300475", "concept": "\u5b58\u50a8\u3001\u4e1a\u7ee9\u589e\u957f", "cuohe": 54956160, "fengdan": null, "jjzf": 2.37, "ltsz": 72016345040, "name": "\u9999\u519c\u82af\u521b", "weimai": 6285408, "zf": 3.24, "zhuli": 57243}, {"ban": "", "code": "300932", "concept": "\u53d8\u538b\u5668\u3001\u667a\u80fd\u7535\u7f51", "cuohe": 6193905, "fengdan": null, "jjzf": 2.73, "ltsz": 2069654373, "name": "\u4e09\u53cb\u8054\u4f17", "weimai": 6151376, "zf": 0.39, "zhuli": 1982345}, {"ban": "", "code": "002031", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u5de5\u4e1a\u673a\u5668\u4eba", "cuohe": 31119990, "fengdan": null, "jjzf": -3.71, "ltsz": 12685306599, "name": "\u5de8\u8f6e\u667a\u80fd", "weimai": 6146206, "zf": -0.8, "zhuli": 5715076}, {"ban": "", "code": "002080", "concept": "\u7535\u5b50\u5e03\u3001\u73bb\u7ea4", "cuohe": 15267912, "fengdan": null, "jjzf": 1.89, "ltsz": 45197614012, "name": "\u4e2d\u6750\u79d1\u6280", "weimai": 6089801, "zf": 3.86, "zhuli": 936802}, {"ban": "", "code": "002475", "concept": "\u5149\u6a21\u5757\u3001CPO/MPO", "cuohe": 73845713, "fengdan": null, "jjzf": 1.34, "ltsz": 325791141712, "name": "\u7acb\u8baf\u7cbe\u5bc6", "weimai": 5796416, "zf": 2.47, "zhuli": 13970059}, {"ban": "", "code": "301611", "concept": "\u5b58\u50a8\u3001OLED", "cuohe": 21273600, "fengdan": null, "jjzf": 2.73, "ltsz": 17937323531, "name": "\u73c2\u739b\u79d1\u6280", "weimai": 5711614, "zf": -1.77, "zhuli": 3686400}, {"ban": "", "code": "300395", "concept": "\u7535\u5b50\u5e03\u3001\u9762\u677f", "cuohe": 54831260, "fengdan": null, "jjzf": 2.71, "ltsz": 60305711768, "name": "\u83f2\u5229\u534e", "weimai": 5305031, "zf": 1.35, "zhuli": 11326391}, {"ban": "", "code": "300857", "concept": "\u5b58\u50a8\u3001\u6570\u5b57\u7ecf\u6d4e", "cuohe": 46927188, "fengdan": null, "jjzf": 1.11, "ltsz": 86391847434, "name": "\u534f\u521b\u6570\u636e", "weimai": 5107596, "zf": -0.3, "zhuli": 910406}, {"ban": "", "code": "300750", "concept": "\u50a8\u80fd\u3001\u52a8\u529b\u7535\u6c60", "cuohe": 169501519, "fengdan": null, "jjzf": 1.23, "ltsz": 1184820475476, "name": "\u5b81\u5fb7\u65f6\u4ee3", "weimai": 4976998, "zf": 1.39, "zhuli": 37814734}, {"ban": "", "code": "000608", "concept": "\u623f\u5730\u4ea7\u3001\u80a1\u6743\u8f6c\u8ba9", "cuohe": 14426580, "fengdan": null, "jjzf": 4.22, "ltsz": 2756889284, "name": "\u9633\u5149\u80a1\u4efd", "weimai": 4882704, "zf": -0.74, "zhuli": -2021877}, {"ban": "", "code": "002149", "concept": "\u5546\u4e1a\u822a\u5929\u3001\u6838\u7535", "cuohe": 38980598, "fengdan": null, "jjzf": -0.16, "ltsz": 23444772851, "name": "\u897f\u90e8\u6750\u6599", "weimai": 4841200, "zf": 1.14, "zhuli": -8870814}, {"ban": "", "code": "301183", "concept": "\u901a\u4fe1\u3001\u65e0\u4eba\u9a7e\u9a76", "cuohe": 34068000, "fengdan": null, "jjzf": 1.8, "ltsz": 11964704370, "name": "\u4e1c\u7530\u5fae", "weimai": 4659300, "zf": 2.42, "zhuli": -7701000}, {"ban": "", "code": "300666", "concept": "\u5149\u523b\u673a\u3001\u534a\u5bfc\u4f53\u8bbe\u5907", "cuohe": 31176000, "fengdan": null, "jjzf": 1.32, "ltsz": 45108592845, "name": "\u6c5f\u4e30\u7535\u5b50", "weimai": 4461645, "zf": 1.97, "zhuli": -7923900}, {"ban": "", "code": "002294", "concept": "\u51cf\u80a5\u836f\u3001\u964d\u538b\u836f", "cuohe": 5844423, "fengdan": null, "jjzf": 0.14, "ltsz": 17082630269, "name": "\u4fe1\u7acb\u6cf0", "weimai": 4410921, "zf": 2.28, "zhuli": 918256}, {"ban": "", "code": "002449", "concept": "\u80a1\u6743\u8f6c\u8ba9\u3001\u5148\u8fdb\u5c01\u88c5", "cuohe": 7549788, "fengdan": null, "jjzf": 4.21, "ltsz": 4220109693, "name": "\u56fd\u661f\u5149\u7535", "weimai": 4385333, "zf": 4.57, "zhuli": 2109572}, {"ban": "", "code": "301362", "concept": "\u5e76\u8d2d\u91cd\u7ec4\u3001LED", "cuohe": 7428274, "fengdan": null, "jjzf": 4.06, "ltsz": 6084723600, "name": "\u6c11\u7206\u5149\u7535", "weimai": 4258366, "zf": -0.6, "zhuli": 1288138}, {"ban": "", "code": "000034", "concept": "\u670d\u52a1\u5668\u3001\u6570\u5b57\u7ecf\u6d4e", "cuohe": 17356108, "fengdan": null, "jjzf": 0.89, "ltsz": 23531177406, "name": "\u795e\u5dde\u6570\u7801", "weimai": 4250880, "zf": -1.99, "zhuli": -4526957}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000926", "concept": "\u623f\u5730\u4ea7\u3001\u5730\u4ea7\u94fe", "cuohe": 19319776, "fengdan": null, "jjzf": -1.75, "ltsz": 2666007413, "name": "\u798f\u661f\u80a1\u4efd", "weimai": 4230856, "zf": -6.14, "zhuli": -3958080}, {"ban": "", "code": "000960", "concept": "\u91d1\u5c5e\u9521\u3001\u91d1\u5c5e\u94a8", "cuohe": 35740090, "fengdan": null, "jjzf": 2.99, "ltsz": 34764776780, "name": "\u9521\u4e1a\u80a1\u4efd", "weimai": 4219572, "zf": 3.76, "zhuli": 6728960}, {"ban": "", "code": "300938", "concept": "\u5b58\u50a8\u3001\u5c0f\u7c73\u673a\u5668\u4eba", "cuohe": 33368934, "fengdan": null, "jjzf": 3.71, "ltsz": 8782818922, "name": "\u4fe1\u6d4b\u6807\u51c6", "weimai": 4070854, "zf": 5.57, "zhuli": -8546148}, {"ban": "", "code": "300442", "concept": "\u6570\u636e\u4e2d\u5fc3\u3001\u7b97\u529b", "cuohe": 38979480, "fengdan": null, "jjzf": 1.62, "ltsz": 64257565445, "name": "\u6da6\u6cfd\u79d1\u6280", "weimai": 4048704, "zf": 0.9, "zhuli": -399362}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002169", "concept": "\u82af\u7247\u3001\u667a\u80fd\u7535\u7f51", "cuohe": 43736054, "fengdan": null, "jjzf": 0.34, "ltsz": 10808031400, "name": "\u667a\u5149\u7535\u6c14", "weimai": 3985200, "zf": 2.01, "zhuli": -12388157}, {"ban": "", "code": "002916", "concept": "\u5370\u5236\u7535\u8def\u677f\u3001\u901a\u4fe1", "cuohe": 29241000, "fengdan": null, "jjzf": 2.43, "ltsz": 84716515307, "name": "\u6df1\u5357\u7535\u8def", "weimai": 3856335, "zf": 7.4, "zhuli": 8652600}, {"ban": "", "code": "001257", "concept": "\u5c0f\u91d1\u5c5e\u6982\u5ff5\u3001\u4e1a\u7ee9\u589e\u957f", "cuohe": 6117500, "fengdan": null, "jjzf": 0.81, "ltsz": 3486695774, "name": "\u76db\u9f99\u80a1\u4efd", "weimai": 3835556, "zf": 2.54, "zhuli": 907500}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "301092", "concept": "\u76d0\u6e56\u63d0\u9502\u3001\u5316\u5de5", "cuohe": 24249830, "fengdan": null, "jjzf": -0.51, "ltsz": 1868187625, "name": "\u4e89\u5149\u80a1\u4efd", "weimai": 3684073, "zf": 2.6, "zhuli": -1698556}, {"ban": "", "code": "002150", "concept": "\u50a8\u80fd\u3001\u9006\u53d8\u5668", "cuohe": 21022976, "fengdan": null, "jjzf": -3.17, "ltsz": 7182595297, "name": "\u6b63\u6cf0\u7535\u6e90", "weimai": 3663672, "zf": -2.12, "zhuli": 602367}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002787", "concept": "\u82af\u7247\u3001\u5305\u88c5\u5370\u5237", "cuohe": 11697960, "fengdan": null, "jjzf": 0.78, "ltsz": 5458346814, "name": "\u534e\u6e90\u63a7\u80a1", "weimai": 3617700, "zf": -3.34, "zhuli": -979800}, {"ban": "", "code": "300166", "concept": "\u7b97\u529b\u3001\u65b0\u578b\u5de5\u4e1a\u5316", "cuohe": 49602848, "fengdan": null, "jjzf": 1.47, "ltsz": 16477743708, "name": "\u4e1c\u65b9\u56fd\u4fe1", "weimai": 3550668, "zf": -3.19, "zhuli": 19798699}, {"ban": "", "code": "300054", "concept": "\u5149\u523b\u80f6\u3001\u629b\u5149\u6db2", "cuohe": 28376504, "fengdan": null, "jjzf": 1.09, "ltsz": 52637731048, "name": "\u9f0e\u9f99\u80a1\u4efd", "weimai": 3531643, "zf": 2.42, "zhuli": -7356296}, {"ban": "", "code": "001270", "concept": "\u536b\u661f\u5bfc\u822a\u3001\u5546\u4e1a\u822a\u5929", "cuohe": 42371346, "fengdan": null, "jjzf": -0.86, "ltsz": 16262498216, "name": "\u94d6\u660c\u79d1\u6280", "weimai": 3490435, "zf": 9.83, "zhuli": 10791148}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002126", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u7b97\u529b", "cuohe": 51237162, "fengdan": null, "jjzf": 0.65, "ltsz": 45961186342, "name": "\u94f6\u8f6e\u80a1\u4efd", "weimai": 3486298, "zf": 5.61, "zhuli": 427268}, {"ban": "", "code": "300263", "concept": "\u9776\u6750\u3001OLED", "cuohe": 17173286, "fengdan": null, "jjzf": 0.65, "ltsz": 11186269124, "name": "\u9686\u534e\u79d1\u6280", "weimai": 3480142, "zf": -3.33, "zhuli": -5483322}, {"ban": "", "code": "002918", "concept": "\u82af\u7247\u3001\u88c5\u4fee\u5bb6\u5177", "cuohe": 22863244, "fengdan": null, "jjzf": -6.23, "ltsz": 1999942766, "name": "\u8499\u5a1c\u4e3d\u838e", "weimai": 3472720, "zf": -5.5, "zhuli": -4080860}, {"ban": "", "code": "002277", "concept": "\u78b3\u5316\u7845\u3001NMN", "cuohe": 9046422, "fengdan": null, "jjzf": 2.91, "ltsz": 6501624472, "name": "\u53cb\u963f\u80a1\u4efd", "weimai": 3284499, "zf": 5.21, "zhuli": -1426546}, {"ban": "", "code": "002491", "concept": "\u5149\u7ea4\u6982\u5ff5\u3001\u901a\u4fe1", "cuohe": 26646055, "fengdan": null, "jjzf": -0.91, "ltsz": 17862368045, "name": "\u901a\u9f0e\u4e92\u8054", "weimai": 3252168, "zf": -4.39, "zhuli": -5508686}, {"ban": "", "code": "002600", "concept": "\u673a\u5668\u4eba\u6982\u5ff5\u3001\u7aef\u4fa7AI", "cuohe": 28575056, "fengdan": null, "jjzf": 1.23, "ltsz": 50120744951, "name": "\u9886\u76ca\u667a\u9020", "weimai": 3218355, "zf": 0.74, "zhuli": -1125459}, {"ban": "", "code": "002980", "concept": "\u5149\u6a21\u5757\u3001\u901a\u4fe1", "cuohe": 25856052, "fengdan": null, "jjzf": 1.61, "ltsz": 6876822269, "name": "\u534e\u76db\u660c", "weimai": 3162899, "zf": -1.97, "zhuli": 4004755}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000695", "concept": "\u8d1f\u6781\u3001\u5e76\u8d2d\u91cd\u7ec4", "cuohe": 8255610, "fengdan": null, "jjzf": -0.31, "ltsz": 2625653277, "name": "\u6ee8\u6d77\u80fd\u6e90", "weimai": 3106064, "zf": -2.72, "zhuli": -1822204}, {"ban": "", "code": "300059", "concept": "\u8bc1\u5238\u3001\u91d1\u878d\u6982\u5ff5", "cuohe": 23258245, "fengdan": null, "jjzf": 0.92, "ltsz": 258296081473, "name": "\u4e1c\u65b9\u8d22\u5bcc", "weimai": 3089221, "zf": 5.69, "zhuli": 2425667}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "000716", "concept": "\u98df\u54c1\u996e\u6599\u3001\u9502\u7535\u6c60", "cuohe": 9694300, "fengdan": null, "jjzf": 0.55, "ltsz": 2701227348, "name": "\u9ed1\u829d\u9ebb", "weimai": 3038294, "zf": 3.84, "zhuli": -6063750}, {"ban": "", "code": "000070", "concept": "\u5149\u7ea4\u6982\u5ff5\u3001\u901a\u4fe1", "cuohe": 33497463, "fengdan": null, "jjzf": -1.76, "ltsz": 9743847924, "name": "\u7279\u53d1\u4fe1\u606f", "weimai": 3000250, "zf": -5.8, "zhuli": -2989766}, {"ban": "", "code": "002348", "concept": "\u7b97\u529b\u3001\u751f\u80b2\u6982\u5ff5", "cuohe": 21897131, "fengdan": null, "jjzf": -5.45, "ltsz": 9751374470, "name": "\u9ad8\u4e50\u80a1\u4efd", "weimai": 2997720, "zf": 2.54, "zhuli": 974449}, {"ban": "", "code": "300721", "concept": "\u5149\u523b\u80f6\u3001\u5316\u5de5", "cuohe": 14670895, "fengdan": null, "jjzf": 0.76, "ltsz": 3181268099, "name": "\u6021\u8fbe\u80a1\u4efd", "weimai": 2991360, "zf": 3.66, "zhuli": -862605}, {"ban": "", "code": "300296", "concept": "Mini/Micro\u3001VR/AR/MR", "cuohe": 31400446, "fengdan": null, "jjzf": 5.89, "ltsz": 14172168808, "name": "\u5229\u4e9a\u5fb7", "weimai": 2910784, "zf": 2.42, "zhuli": 15723266}, {"ban": "", "code": "300042", "concept": "\u5b58\u50a8\u3001RISC-V", "cuohe": 30804272, "fengdan": null, "jjzf": 0.42, "ltsz": 10816908062, "name": "\u6717\u79d1\u79d1\u6280", "weimai": 2905096, "zf": -2.78, "zhuli": -12842109}, {"ban": "", "code": "300274", "concept": "\u50a8\u80fd\u3001\u9006\u53d8\u5668", "cuohe": 101764574, "fengdan": null, "jjzf": 0.06, "ltsz": 240310788713, "name": "\u9633\u5149\u7535\u6e90", "weimai": 2889216, "zf": 0.29, "zhuli": 18842315}, {"ban": "", "code": "002755", "concept": "\u521b\u65b0\u836f\u3001\u533b\u7597\u5668\u68b0", "cuohe": 15501660, "fengdan": null, "jjzf": 1.75, "ltsz": 4843597679, "name": "\u5965\u8d5b\u5eb7", "weimai": 2862882, "zf": 0.82, "zhuli": 984840}, {"ban": "", "code": "300655", "concept": "\u5b58\u50a8\u3001\u5149\u523b\u80f6", "cuohe": 29734976, "fengdan": null, "jjzf": -0.46, "ltsz": 15793769237, "name": "\u6676\u745e\u7535\u6750", "weimai": 2825045, "zf": -1.67, "zhuli": -17597120}, {"ban": "3\u8fde\u677f", "code": "003004", "concept": "\u5b89\u9632\u3001\u6570\u5b57\u7ecf\u6d4e", "cuohe": 6741020, "fengdan": 3596, "jjzf": 4.45, "ltsz": 1692175700, "name": "\u58f0\u8fc5\u80a1\u4efd", "weimai": 2809624, "zf": 9.99, "zhuli": -537396}, {"ban": "", "code": "300769", "concept": "\u9502\u7535\u6c60\u3001\u78f7\u9178\u94c1\u9502", "cuohe": 31951260, "fengdan": null, "jjzf": -1.63, "ltsz": 17171811120, "name": "\u5fb7\u65b9\u7eb3\u7c73", "weimai": 2789640, "zf": 4.88, "zhuli": -14955600}, {"ban": "", "code": "301348", "concept": "\u82af\u7247\u3001\u534e\u4e3a\u6982\u5ff5", "cuohe": 11281517, "fengdan": null, "jjzf": 1.11, "ltsz": 4674343162, "name": "\u84dd\u7bad\u7535\u5b50", "weimai": 2740150, "zf": -1.92, "zhuli": 1376401}, {"ban": "", "code": "300058", "concept": "AI\u89c6\u9891\u3001AI\u5e94\u7528", "cuohe": 32522878, "fengdan": null, "jjzf": 0.62, "ltsz": 63472227646, "name": "\u84dd\u8272\u5149\u6807", "weimai": 2723809, "zf": 3.17, "zhuli": -5442729}, {"ban": "", "code": "300608", "concept": "\u7b97\u529b\u8c03\u5ea6\u3001\u7b97\u529b", "cuohe": 20859930, "fengdan": null, "jjzf": -0.47, "ltsz": 3138497528, "name": "\u601d\u7279\u5947", "weimai": 2712244, "zf": -5.74, "zhuli": 3049608}, {"ban": "", "code": "002181", "concept": "\u8db3\u7403\u6982\u5ff5\u3001AI\u5e94\u7528", "cuohe": 15586464, "fengdan": null, "jjzf": 0.21, "ltsz": 5251520387, "name": "\u7ca4\u4f20\u5a92", "weimai": 2705018, "zf": -2.14, "zhuli": -3506573}, {"ban": "", "code": "301526", "concept": "\u73bb\u7ea4\u3001\u901a\u4fe1", "cuohe": 19797918, "fengdan": null, "jjzf": 1.28, "ltsz": 26781773042, "name": "\u56fd\u9645\u590d\u6750", "weimai": 2702495, "zf": 1.54, "zhuli": -8806260}, {"ban": "", "code": "300623", "concept": "IGBT\u3001\u82af\u7247", "cuohe": 13539780, "fengdan": null, "jjzf": 0.65, "ltsz": 16532996200, "name": "\u6377\u6377\u5fae\u7535", "weimai": 2634388, "zf": 1.74, "zhuli": -1798920}, {"ban": "", "code": "002297", "concept": "\u5546\u4e1a\u822a\u5929\u3001\u5927\u98de\u673a", "cuohe": 19116584, "fengdan": null, "jjzf": 0, "ltsz": 12101119715, "name": "\u535a\u4e91\u65b0\u6750", "weimai": 2625696, "zf": 7.72, "zhuli": 676172}, {"ban": "", "code": "300687", "concept": "AI\u667a\u80fd\u4f53\u3001AI\u5e94\u7528", "cuohe": 11985443, "fengdan": null, "jjzf": -0.6, "ltsz": 10005082773, "name": "\u8d5b\u610f\u4fe1\u606f", "weimai": 2623784, "zf": -2.79, "zhuli": -1014073}, {"ban": "", "code": "301682", "concept": "\u5143\u5668\u4ef6\u3001\u5546\u4e1a\u822a\u5929", "cuohe": 14252502, "fengdan": null, "jjzf": 0.78, "ltsz": 4169484785, "name": "\u5b8f\u660e\u7535\u5b50", "weimai": 2483578, "zf": 3.44, "zhuli": -1232482}, {"ban": "\u6628\u65e5\u9996\u677f", "code": "002645", "concept": "\u7a00\u571f\u6c38\u78c1\u3001\u673a\u5668\u4eba\u6982\u5ff5", "cuohe": 23604075, "fengdan": null, "jjzf": 0.46, "ltsz": 9898838324, "name": "\u534e\u5b8f\u79d1\u6280", "weimai": 2427696, "zf": -0.03, "zhuli": -1073875}, {"ban": "", "code": "301599", "concept": "\u6b21\u65b0\u80a1\u3001\u9502\u7535\u8bbe\u5907", "cuohe": 35776831, "fengdan": null, "jjzf": -3.77, "ltsz": 4174197902, "name": "\u7406\u5947\u667a\u80fd", "weimai": 2404038, "zf": -4.03, "zhuli": 7307968}, {"ban": "", "code": "300570", "concept": "\u5149\u7ea4\u6982\u5ff5\u3001CPO/MPO", "cuohe": 31346250, "fengdan": null, "jjzf": 0.87, "ltsz": 24263487411, "name": "\u592a\u8fb0\u5149", "weimai": 2397161, "zf": -2.48, "zhuli": -5729911}, {"ban": "", "code": "002851", "concept": "\u82f1\u4f1f\u8fbe\u6982\u5ff5\u3001\u7b97\u529b", "cuohe": 18565932, "fengdan": null, "jjzf": 1.57, "ltsz": 48982236639, "name": "\u9ea6\u683c\u7c73\u7279", "weimai": 2387022, "zf": 0.49, "zhuli": -448272}, {"ban": "", "code": "002364", "concept": "\u7535\u6e90\u3001\u667a\u80fd\u7535\u7f51", "cuohe": 34857060, "fengdan": null, "jjzf": 1.2, "ltsz": 17013449331, "name": "\u4e2d\u6052\u7535\u6c14", "weimai": 2380560, "zf": -0.1, "zhuli": 4109419}];
+let jjydMode = 'all';
+let jjydSort = 'zhuli';
+
+function sortKey(s, key) {
+  const v = s[key];
+  if (v === 'none' || v === null || v === undefined || v === '') return -Infinity;
+  const n = Number(v);
+  return isNaN(n) ? -Infinity : n;
+}
+
+function fmtYuan(v) {
+  v = Number(v) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1e8) return (v / 1e8).toFixed(1) + '亿';
+  if (abs >= 1e4) return Math.round(v / 1e4) + '万';
+  return v.toString();
+}
+function fmtWan(v) {
+  v = Number(v) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1e4) return (v / 1e4).toFixed(1) + '亿';
+  return Math.round(v) + '万';
+}
+function banClass(ban) {
+  if (!ban) return '';
+  if (/首板/.test(ban)) return 'first';
+  if (/连板|天.板/.test(ban)) return 'lianban';
+  return '';
+}
+function lianbanCount(ban) {
+  if (!ban) return 0;
+  let m = ban.match(/(\d+)\s*连板/);
+  if (m) return parseInt(m[1]);
+  m = ban.match(/(\d+)\s*天\s*(\d+)\s*板/);
+  if (m) return parseInt(m[2]);
+  if (/首板/.test(ban)) return 1;
+  return 0;
+}
+
+function renderJjyd() {
+  let list = jjydRaw.slice();
+  if (jjydMode === 'lianban') {
+    list = list.filter(s => lianbanCount(s.ban) >= 2);
+  } else if (jjydMode === 'shouban') {
+    list = list.filter(s => /首板/.test(s.ban || ''));
+  }
+  list.sort((a, b) => sortKey(b, jjydSort) - sortKey(a, jjydSort));
+
+  const sortLabels = { zhuli: '主力净额', weimai: '委买', cuohe: '撮合', jjzf: '竞价涨幅', fengdan: '封单' };
+  const summary = document.getElementById('jjyd-summary');
+  const content = document.getElementById('jjyd-content');
+  summary.textContent = list.length ? `共 ${list.length} 只，按${sortLabels[jjydSort]}降序` : '';
+
+  if (!list.length) {
+    content.innerHTML = '<div class="empty">暂无数据</div>';
+    return;
+  }
+
+  const rows = list.map(s => {
+    const zf = Number(s.zf);
+    const zfCls = zf > 0 ? 'money-up' : zf < 0 ? 'money-down' : '';
+    const jjzfRaw = s.jjzf;
+    let jjzfHtml = '';
+    if (jjzfRaw !== 'none' && jjzfRaw !== null && jjzfRaw !== undefined) {
+      const jv = Number(jjzfRaw);
+      jjzfHtml = `<div class="pct-jj">竞${jv > 0 ? '+' : ''}${jjzfRaw}%</div>`;
+    }
+    const zfHtml = `<div class="${zfCls}">${zf > 0 ? '+' : ''}${s.zf}%</div>`;
+
+    const zhuli = Number(s.zhuli) || 0;
+    const zhuliCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
+    const zhuliText = zhuli ? fmtYuan(zhuli) : '--';
+
+    const banCls = banClass(s.ban);
+    const banHtml = s.ban ? `<span class="ban-tag ${banCls}">${s.ban}</span>` : '';
+
+    return `<tr>
+      <td>
+        <div class="stock-name">${s.name}</div>
+        <div class="stock-code">${s.code}</div>
+        ${banHtml}
+      </td>
+      <td>${jjzfHtml}${zfHtml}</td>
+      <td><div class="pair"><span class="v1">${fmtYuan(s.weimai)}</span><br>${fmtYuan(s.cuohe)}</div></td>
+      <td><span class="${zhuliCls}">${zhuliText}</span></td>
+      <td class="col-fd">${s.fengdan ? fmtWan(s.fengdan) : '--'}</td>
+      <td class="col-ltsz">${fmtYuan(s.ltsz)}</td>
+      <td><div class="concept">${(s.concept || '').replace('、', '<br>')}</div></td>
+    </tr>`;
+  }).join('');
+
+  content.innerHTML = `<table class="jjyd-table">
+    <thead><tr>
+      <th>股票/板</th>
+      <th>竞价/现价</th>
+      <th>委买/撮合</th>
+      <th>主力</th>
+      <th class="col-fd">封单</th>
+      <th class="col-ltsz">流通</th>
+      <th>概念</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+document.querySelectorAll('.jjyd-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.jjyd-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    jjydMode = btn.dataset.mode;
+    renderJjyd();
+  });
+});
+
+document.querySelectorAll('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    jjydSort = btn.dataset.sort;
+    renderJjyd();
+  });
+});
+
+renderJjyd();
+
+// 大资金情绪
+const topVolume = [{"amp": 8.28, "code": "688008", "hsl": 5.44, "industry": "\u534a\u5bfc\u4f53", "name": "\u6f9c\u8d77\u79d1\u6280", "price": 279.48, "turnover": 17197351661.0, "zf": 8.62, "zhuli": 1031671808.0}, {"amp": 4.45, "code": "603986", "hsl": 4.68, "industry": "\u534a\u5bfc\u4f53", "name": "\u5146\u6613\u521b\u65b0", "price": 448.68, "turnover": 14116667586.0, "zf": 0.82, "zhuli": -735985232.0}, {"amp": 8.46, "code": "600584", "hsl": 9.84, "industry": "\u534a\u5bfc\u4f53", "name": "\u957f\u7535\u79d1\u6280", "price": 69.41, "turnover": 12082563407.0, "zf": 4.82, "zhuli": -287289104.0}, {"amp": 4.33, "code": "300308", "hsl": 0.93, "industry": "\u901a\u4fe1\u8bbe\u5907", "name": "\u4e2d\u9645\u65ed\u521b", "price": 1032.1, "turnover": 10798636200.79, "zf": -0.47, "zhuli": -213119936.0}, {"amp": 4.19, "code": "688981", "hsl": 3.92, "industry": "\u534a\u5bfc\u4f53", "name": "\u4e2d\u82af\u56fd\u9645", "price": 135.52, "turnover": 10543046005.0, "zf": 1.28, "zhuli": -379789712.0}, {"amp": 5.08, "code": "000988", "hsl": 6.04, "industry": "\u81ea\u52a8\u5316\u8bbe\u5907", "name": "\u534e\u5de5\u79d1\u6280", "price": 162.35, "turnover": 9776756802.27, "zf": -0.65, "zhuli": -673402896.0}, {"amp": 5.27, "code": "002281", "hsl": 5.55, "industry": "\u901a\u4fe1\u8bbe\u5907", "name": "\u5149\u8fc5\u79d1\u6280", "price": 225.2, "turnover": 9753693669.66, "zf": -4.74, "zhuli": -1643297408.0}, {"amp": 4.43, "code": "688041", "hsl": 1.25, "industry": "\u534a\u5bfc\u4f53", "name": "\u6d77\u5149\u4fe1\u606f", "price": 327.42, "turnover": 9647389488.0, "zf": 3.37, "zhuli": 484004320.0}, {"amp": 3.74, "code": "300502", "hsl": 1.83, "industry": "\u901a\u4fe1\u8bbe\u5907", "name": "\u65b0\u6613\u76db", "price": 588.07, "turnover": 9609321012.06, "zf": 0.02, "zhuli": 207376592.0}, {"amp": 6.1, "code": "300059", "hsl": 3.41, "industry": "\u8bc1\u5238\u2161", "name": "\u4e1c\u65b9\u8d22\u5bcc", "price": 20.78, "turnover": 9410211227.07, "zf": 5.64, "zhuli": 1184767696.0}, {"amp": 4.62, "code": "688256", "hsl": 1.07, "industry": "\u534a\u5bfc\u4f53", "name": "\u5bd2\u6b66\u7eaa", "price": 1344.88, "turnover": 9064816294.0, "zf": -1.29, "zhuli": 45588832.0}, {"amp": 4.04, "code": "002384", "hsl": 2.91, "industry": "\u5143\u4ef6", "name": "\u4e1c\u5c71\u7cbe\u5bc6", "price": 217.12, "turnover": 8894654671.18, "zf": -2.64, "zhuli": -1056248656.0}, {"amp": 3.41, "code": "300274", "hsl": 3.27, "industry": "\u5149\u4f0f\u8bbe\u5907", "name": "\u9633\u5149\u7535\u6e90", "price": 167.62, "turnover": 8845403578.35, "zf": 0.25, "zhuli": 429917440.0}, {"amp": 4.02, "code": "300476", "hsl": 2.94, "industry": "\u5143\u4ef6", "name": "\u80dc\u5b8f\u79d1\u6280", "price": 342.5, "turnover": 8749272317.73, "zf": 2.48, "zhuli": 400722000.0}, {"amp": 9.79, "code": "688012", "hsl": 2.68, "industry": "\u534a\u5bfc\u4f53", "name": "\u4e2d\u5fae\u516c\u53f8", "price": 513.92, "turnover": 8625984602.0, "zf": 4.81, "zhuli": 495843408.0}, {"amp": 7.1, "code": "002156", "hsl": 8.68, "industry": "\u534a\u5bfc\u4f53", "name": "\u901a\u5bcc\u5fae\u7535", "price": 64.82, "turnover": 8529534070.31, "zf": 4.08, "zhuli": 413352528.0}, {"amp": 9.89, "code": "002371", "hsl": 1.57, "industry": "\u534a\u5bfc\u4f53", "name": "\u5317\u65b9\u534e\u521b", "price": 717.2, "turnover": 7959185608.4, "zf": 9.33, "zhuli": 753614496.0}, {"amp": 2.32, "code": "300750", "hsl": 0.43, "industry": "\u7535\u6c60", "name": "\u5b81\u5fb7\u65f6\u4ee3", "price": 420.51, "turnover": 7762516909.48, "zf": 1.39, "zhuli": 177184096.0}, {"amp": 4.02, "code": "000100", "hsl": 8.77, "industry": "\u5149\u5b66\u5149\u7535\u5b50", "name": "TCL\u79d1\u6280", "price": 4.49, "turnover": 7738221378.9, "zf": 6.15, "zhuli": 1163049856.0}, {"amp": 7.37, "code": "002407", "hsl": 16.4, "industry": "\u5316\u5b66\u5236\u54c1", "name": "\u591a\u6c1f\u591a", "price": 42.34, "turnover": 7504291596.51, "zf": 4.06, "zhuli": -220922432.0}];
+const capitalSignals = {"avg_zf": 2.37, "down_count": 5, "flat_count": 0, "signals": [{"label": "\u60c5\u7eea\u504f\u5f3a", "type": "ok"}], "sum_turnover": 196609518085.71002, "sum_zhuli": 1577037696.0, "temp": 91, "up_count": 15};
+
+function tempColor(t) {
+  if (t >= 65) return '#e74c3c';
+  if (t <= 35) return '#27ae60';
+  return '#f39c12';
+}
+
+function renderCapital() {
+  const hasData = topVolume.length > 0 && capitalSignals.temp != null;
+  const t = hasData ? capitalSignals.temp : 50;
+  const arcLen = 301.6; // 2 * PI * 48
+  const arc = document.getElementById('temp-arc');
+  arc.setAttribute('stroke', hasData ? tempColor(t) : '#ddd');
+  arc.setAttribute('stroke-dashoffset', hasData ? arcLen * (1 - t / 100) : arcLen);
+
+  const tv = document.getElementById('temp-value');
+  tv.textContent = hasData ? t : '--';
+  tv.style.color = hasData ? tempColor(t) : '#bbb';
+
+  const up = capitalSignals.up_count || 0;
+  const down = capitalSignals.down_count || 0;
+  const flat = capitalSignals.flat_count || 0;
+  const ratio = down > 0 ? (up / down).toFixed(2) : (up ? '∞' : '0');
+  document.getElementById('cap-rg').innerHTML = `<span class="money-up">${up}红</span> / <span class="money-down">${down}绿</span>${flat ? ` · ${flat}平` : ''} <span style="color:#999;font-weight:400;font-size:0.78rem;">(${ratio})</span>`;
+
+  const avg = capitalSignals.avg_zf ?? 0;
+  const avgCls = avg > 0 ? 'money-up' : avg < 0 ? 'money-down' : '';
+  document.getElementById('cap-avg').innerHTML = `<span class="${avgCls}">${avg > 0 ? '+' : ''}${avg}%</span>`;
+
+  document.getElementById('cap-turn').textContent = fmtYuan(capitalSignals.sum_turnover || 0);
+
+  const zhuli = capitalSignals.sum_zhuli || 0;
+  const zCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
+  document.getElementById('cap-zhuli').innerHTML = `<span class="${zCls}">${zhuli >= 0 ? '+' : '-'}${fmtYuan(Math.abs(zhuli))}</span>`;
+
+  const sigBox = document.getElementById('cap-signals');
+  const sigs = capitalSignals.signals || [];
+  sigBox.innerHTML = sigs.map(s => `<span class="signal ${s.type}">${s.label}${s.tip ? `<span class="tip">${s.tip}</span>` : ''}</span>`).join('');
+
+  const tbody = topVolume.map((s, i) => {
+    const zf = Number(s.zf) || 0;
+    const zfCls = zf > 0 ? 'money-up' : zf < 0 ? 'money-down' : '';
+    const zhuli = Number(s.zhuli) || 0;
+    const zCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
+    return `<tr>
+      <td><span class="rank">${i + 1}</span><span class="stock-name">${s.name}</span><div class="stock-code">${s.code}</div></td>
+      <td><span class="${zfCls}">${zf > 0 ? '+' : ''}${zf}%</span></td>
+      <td>${fmtYuan(s.turnover)}</td>
+      <td><span class="${zCls}">${zhuli ? (zhuli >= 0 ? '+' : '-') + fmtYuan(Math.abs(zhuli)) : '--'}</span></td>
+      <td class="col-hsl">${s.hsl != null ? s.hsl + '%' : '--'}</td>
+      <td class="col-amp">${s.amp != null ? s.amp + '%' : '--'}</td>
+      <td><div class="industry">${s.industry || ''}</div></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('capital-content').innerHTML = topVolume.length
+    ? `<table class="top-volume-table">
+        <thead><tr>
+          <th>股票</th><th>涨幅</th><th>成交额</th><th>主力净额</th>
+          <th class="col-hsl">换手</th><th class="col-amp">振幅</th><th>行业</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>`
+    : '<div class="empty">暂无数据（盘前/休市时段或抓取失败）</div>';
+}
+
+renderCapital();
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.pane;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + target));
+  });
+});
 </script>
 </body>
 </html>

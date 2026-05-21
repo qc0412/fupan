@@ -60,4 +60,13 @@ pip install -r requirements.txt
 
 ## 部署
 
-`render.yaml` 仍保留 Flask + Render.com 部署能力（需在 Render 配置 `DXX_USERNAME` / `DXX_PASSWORD`），但当前主部署路径是 GitHub Actions 生成静态 `index.html` 推到 main 分支。
+**响应式生产 (Render.com)**：[render.yaml](render.yaml) 部署 Flask 服务，绑定 `dev` 分支（`data/data.json` 提交在 dev）。需在 Render 后台配置 `DXX_USERNAME` / `DXX_PASSWORD`。
+
+[app.py](app.py) 的刷新策略：
+- 启动优先 `_load_from_disk()` 读 `data/data.json`，没有数据才阻塞抓 LHB。
+- 竞价异动按 TTL 在 `/` 请求时刷新：交易时段 30 秒，非交易时段 10 分钟，锁内单线程。
+- LHB 由 `APScheduler` 在北京时间周一~周五 18:30 兜底刷新（主路径仍是 GitHub Actions 18:00 抓数据 → 推 dev → 触发 Render 自动部署）。
+- `/healthz` 返回 LHB/竞价条数。
+- 时区：所有时间判断走 `CN_TZ = UTC+8`，容器跑在 UTC 也不会算错。
+
+**静态镜像**：`fetch.yml` workflow 把渲染好的 `index.html` cherry-pick 到 main 分支。竞价数据会冻结在 18:00 那一刻的快照，仅适合无后端的镜像部署。
