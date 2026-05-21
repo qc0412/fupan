@@ -2,7 +2,13 @@ import requests
 import time
 import os
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+CN_TZ = timezone(timedelta(hours=8))
+
+
+def now_cn_str():
+    return datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 BASE_URL = "https://duanxianxia.cn"
 def _load_credentials():
@@ -310,7 +316,6 @@ def fetch_multi_day_lhb():
 
 
 if __name__ == "__main__":
-    from datetime import datetime
     os.makedirs("data", exist_ok=True)
     data_path = "data/data.json"
 
@@ -334,7 +339,7 @@ if __name__ == "__main__":
 
     with open(data_path, "w", encoding="utf-8") as f:
         json.dump({
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": now_cn_str(),
             "trading_days": trading_days,
             "data": result,
             "jjyd": jjyd,
