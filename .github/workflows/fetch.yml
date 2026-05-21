@@ -2,6 +2,7 @@ name: Fetch LHB Data
 
 on:
   schedule:
+    - cron: '10 9 * * 1-5'  # 北京时间 17:10，周一到周五
     - cron: '0 10 * * 1-5'  # 北京时间 18:00，周一到周五
   workflow_dispatch:
 
