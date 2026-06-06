@@ -100,6 +100,7 @@
 <div class="main">
   <div class="tabs">
     <div class="tab active" data-pane="lhb">多次上榜</div>
+    <div class="tab" data-pane="zt">涨停板</div>
     <div class="tab" data-pane="jjyd">竞价净额</div>
     <div class="tab" data-pane="capital">大资金情绪</div>
   </div>
@@ -154,6 +155,23 @@
       </div>
       <div class="dates" id="jjyd-summary"></div>
       <div id="jjyd-content"></div>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-zt">
+    <div class="card">
+      <div class="filters">
+        <button class="filter-btn zt-mode-btn active" data-mode="all">全部</button>
+        <button class="filter-btn zt-mode-btn" data-mode="lianban">仅连板</button>
+        <div class="filter-sep"></div>
+        <span class="filter-label">排序</span>
+        <button class="filter-btn zt-sort-btn active" data-sort="boards">连板高度</button>
+        <button class="filter-btn zt-sort-btn" data-sort="turnover">成交额</button>
+        <button class="filter-btn zt-sort-btn" data-sort="fund">封单</button>
+        <button class="filter-btn zt-sort-btn" data-sort="zbc">炸板</button>
+      </div>
+      <div class="dates" id="zt-summary"></div>
+      <div id="zt-content"></div>
     </div>
   </div>
 </div>
@@ -311,6 +329,76 @@ document.querySelectorAll('.sort-btn').forEach(btn => {
 });
 
 renderJjyd();
+
+// 涨停板
+const ztRaw = {{ zt_pool | tojson }};
+const ztDate = {{ zt_date | tojson }};
+let ztMode = 'all';
+let ztSort = 'boards';
+
+function fmtDate(s) {
+  s = String(s || '');
+  return s.length === 8 ? s.slice(4, 6) + '-' + s.slice(6, 8) : s;
+}
+
+function renderZt() {
+  let list = ztRaw.slice();
+  if (ztMode === 'lianban') list = list.filter(s => (s.boards || 0) >= 2);
+  list.sort((a, b) => (Number(b[ztSort]) || 0) - (Number(a[ztSort]) || 0));
+
+  const maxBoards = ztRaw.reduce((m, s) => Math.max(m, s.boards || 0), 0);
+  const lianbanCnt = ztRaw.filter(s => (s.boards || 0) >= 2).length;
+  const summary = document.getElementById('zt-summary');
+  summary.textContent = ztRaw.length
+    ? `${ztDate ? fmtDate(ztDate) + ' · ' : ''}涨停 ${ztRaw.length} 只 · 连板 ${lianbanCnt} 只 · 最高 ${maxBoards} 板`
+    : '';
+
+  const content = document.getElementById('zt-content');
+  if (!list.length) { content.innerHTML = '<div class="empty">暂无涨停数据</div>'; return; }
+
+  const rows = list.map(s => {
+    const boards = s.boards || 0, days = s.days || 0;
+    let ladder = '首板';
+    if (boards >= 2) ladder = days === boards ? `${boards}连板` : `${days}天${boards}板`;
+    const ladderCls = boards >= 2 ? 'lianban' : 'first';
+    return `<tr>
+      <td><div class="stock-name">${s.name}</div><div class="stock-code">${s.code}</div></td>
+      <td><span class="ban-tag ${ladderCls}">${ladder}</span></td>
+      <td><div class="money-up">+${s.zf}%</div></td>
+      <td>${fmtYuan(s.turnover)}</td>
+      <td><span class="${s.fund ? 'money-up' : ''}">${s.fund ? fmtYuan(s.fund) : '--'}</span></td>
+      <td class="col-amp">${s.zbc ? s.zbc + '次' : '0'}</td>
+      <td class="col-ltsz">${s.hsl}%</td>
+      <td><div class="concept">${s.hybk || ''}</div></td>
+    </tr>`;
+  }).join('');
+
+  content.innerHTML = `<table class="jjyd-table">
+    <thead><tr>
+      <th>股票</th><th>连板</th><th>涨幅</th><th>成交额</th><th>封单</th>
+      <th class="col-amp">炸板</th><th class="col-ltsz">换手</th><th>题材</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+document.querySelectorAll('.zt-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.zt-mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ztMode = btn.dataset.mode;
+    renderZt();
+  });
+});
+document.querySelectorAll('.zt-sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.zt-sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ztSort = btn.dataset.sort;
+    renderZt();
+  });
+});
+renderZt();
 
 // 大资金情绪
 const topVolume = {{ top_volume | tojson }};

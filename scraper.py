@@ -2,6 +2,7 @@ import requests
 import time
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 CN_TZ = timezone(timedelta(hours=8))
@@ -67,127 +68,200 @@ def _get_session():
     return _session
 
 
+# 东财龙虎榜：datacenter-web 子域，数据中心 IP 可直连（替代被封的 duanxianxia）。
+LHB_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+LHB_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"}
+
+
 def get_lhb(date_str):
-    global _session
-    for attempt in range(2):
-        try:
-            r = _get_session().post(
-                BASE_URL + "/api/getLhbByStock",
-                data={"date": date_str},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list) and data:
-                return data
-            # null 或空列表说明 cookie 失效，重新登录
-            if attempt == 0:
-                _session = _login()
-        except Exception:
-            if attempt == 0:
-                try:
-                    _session = _login()
-                except Exception:
-                    pass
-    return []
+    """东财龙虎榜每日明细。date_str 形如 2026-06-05。
+    返回 [{"info": {"code","name","zf"}}, ...]，与 fetch_multi_day_lhb 聚合逻辑兼容。
+    非交易日 / 无数据返回空列表（上游据此跳过该日）。"""
+    try:
+        r = requests.get(
+            LHB_URL,
+            params={
+                "reportName": "RPT_DAILYBILLBOARD_DETAILSNEW",
+                "columns": "SECURITY_CODE,SECURITY_NAME_ABBR,CHANGE_RATE",
+                "pageNumber": 1, "pageSize": 500,
+                "sortColumns": "SECURITY_CODE", "sortTypes": 1,
+                "filter": f"(TRADE_DATE='{date_str}')",
+            },
+            headers=LHB_HEADERS, timeout=10,
+        )
+        r.raise_for_status()
+        rows = ((r.json() or {}).get("result") or {}).get("data") or []
+        out = []
+        for it in rows:
+            code = str(it.get("SECURITY_CODE") or "")
+            if not code:
+                continue
+            out.append({"info": {
+                "code": code,
+                "name": it.get("SECURITY_NAME_ABBR") or "",
+                "zf": _num(it.get("CHANGE_RATE")),
+            }})
+        return out
+    except Exception:
+        return []
+
+
+# 竞价净额：duanxianxia 集合竞价主力净额（9:25 第一时间结算）。
+# www.duanxianxia.com 子域（45.125.47.48）数据中心 IP 可直连——裸域/.cn 走被封 CDN(43.141.11.140)。
+# 文件 AES-256-CBC 加密，密钥/IV 取自站点 crypto.js decryptData()。
+JJ_URL = "https://www.duanxianxia.com/vendor/stockdata/jjzhuli.json"
+JJ_KEY = bytes.fromhex("7365637265746b65793332327965732121616161616161616161616161616161")
+JJ_IV = bytes.fromhex("666978656469765f313676616c756564")
 
 
 def get_jjyd():
-    """抓取竞价净额数据（/mob/jjyd 页面"竞价净额"tab，背后接口 /data/getJjzhuliData/4，按竞价主力净额降序）。"""
-    global _session
-    for attempt in range(2):
-        try:
-            s = _get_session()
-            r = s.post(
-                BASE_URL + "/data/getJjzhuliData/4",
-                headers={"Referer": BASE_URL + "/mob/jjyd/4ac6af32a6ffc014"},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, dict) and data.get("list"):
-                return data["list"]
-            if attempt == 0:
-                _session = _login()
-        except Exception:
-            if attempt == 0:
-                try:
-                    _session = _login()
-                except Exception:
-                    pass
-    return []
-
-
-# 东财 push2 是 0~99 编号的负载均衡子域，HTTPS 在部分网络下不稳，用 HTTP 直连更可靠
-EASTMONEY_HOSTS = [
-    "http://push2his.eastmoney.com",   # 主路径
-    "http://82.push2.eastmoney.com",   # 子域 fallback
-    "http://0.push2.eastmoney.com",
-    "https://82.push2.eastmoney.com",  # HTTPS 兜底
-]
-# 全 A 股市场（沪深主板+创业板+科创板+北交所）
-EASTMONEY_FS = "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
-
-
-def get_top_volume(n=20):
-    """从东方财富取成交额前 N 的个股快照。失败时自动切换 push2 子域重试。"""
-    fields = "f2,f3,f6,f7,f8,f12,f14,f62,f100"
-    # f2 最新价 / f3 涨跌幅% / f6 成交额(元) / f7 振幅% / f8 换手率%
-    # f12 代码 / f14 名称 / f62 主力净流入(元) / f100 行业
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Referer": "https://quote.eastmoney.com/",
-    }
-    for base in EASTMONEY_HOSTS:
-        url = (f"{base}/api/qt/clist/get"
-               f"?pn=1&pz={n}&po=1&fid=f6"
-               f"&fs={EASTMONEY_FS}&fields={fields}")
-        try:
-            r = requests.get(url, headers=headers, timeout=6)
-            r.raise_for_status()
-            j = r.json()
-            diff = (j.get("data") or {}).get("diff") or {}
-            if not diff:
-                continue
-            if isinstance(diff, list):
-                return diff
-            return [diff[k] for k in sorted(diff.keys(), key=int)]
-        except Exception:
-            continue
-    return []
-
-
-def _scale(v, factor=100):
-    """东财 f2/f3/f7/f8 是 ×100 的整数，统一除回去。"""
-    if v is None or v == "-":
-        return None
+    """取 duanxianxia 竞价净额（9 字段数组列表）：
+    [代码, 名称, 竞价涨幅%, 现价涨幅%, 竞价主力净额(万), 竞额(万), 流通市值(亿), 概念, 竞价换手%]。"""
     try:
-        return round(float(v) / factor, 2)
+        import base64
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import unpad
+        r = requests.get(JJ_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        ct = base64.b64decode(r.text.strip())
+        pt = unpad(AES.new(JJ_KEY, AES.MODE_CBC, JJ_IV).decrypt(ct), 16)
+        return json.loads(pt.decode("utf-8")).get("list") or []
+    except Exception:
+        return []
+
+
+# 新浪财经：沪深A股成交额排行 + 个股主力净流入。数据中心 IP 可直连，比东财稳定。
+SINA_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
+SINA_RANK_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
+SINA_FLOW_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs"
+
+
+def _num(v):
+    """安全转 float，失败返回 None。"""
+    try:
+        return round(float(v), 2)
     except (TypeError, ValueError):
         return None
 
 
-def parse_top_volume(raw):
-    """重命名字段、过滤 B 股/ST/无成交（避免盘前/收盘前的占位数据污染列表）。"""
+# 东财涨停池：push2ex 子域，数据中心 IP 可直连（与被封的 push2 实时行情子域不同）。
+ZTPOOL_URL = "https://push2ex.eastmoney.com/getTopicZTPool"
+ZTPOOL_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+
+
+def get_zt_pool(date_str=None):
+    """取东财涨停池。date_str=None 时从今天往前找最近一个有涨停数据的交易日。
+    返回 (pool 原始列表, qdate 字符串)。"""
+    if date_str:
+        candidates = [date_str]
+    else:
+        candidates = [(date.today() - timedelta(days=i)).strftime("%Y%m%d") for i in range(7)]
+    for d in candidates:
+        try:
+            r = requests.get(
+                ZTPOOL_URL,
+                params={"ut": "7eea3edcaed734bea9cbfc24409ed989", "dpt": "wz.ztzt",
+                        "Pageindex": 0, "pagesize": 300, "sort": "zttj:desc", "date": d},
+                headers=ZTPOOL_HEADERS, timeout=8,
+            )
+            r.raise_for_status()
+            data = (r.json() or {}).get("data") or {}
+            pool = data.get("pool") or []
+            if pool:
+                return pool, str(data.get("qdate") or d)
+        except Exception:
+            continue
+    return [], ""
+
+
+def parse_zt_pool(raw):
+    """涨停池字段映射：含连板高度(zttj)、封单、炸板次数、题材。剔除 ST/退市。
+    按连板高度降序、其次成交额。"""
     result = []
     for it in raw:
-        code = str(it.get("f12") or "")
-        name = it.get("f14") or ""
-        if not code or code.startswith("900") or code.startswith("200") or "ST" in name.upper():
+        code = str(it.get("c") or "")
+        name = it.get("n") or ""
+        if not code or "ST" in name.upper() or "退" in name:
             continue
-        if not (it.get("f6") or 0):
-            continue  # 成交额为 0 直接丢弃
+        z = it.get("zttj") or {}
         result.append({
             "code": code,
             "name": name,
-            "price": _scale(it.get("f2")),
-            "zf": _scale(it.get("f3")),
-            "turnover": it.get("f6"),
-            "amp": _scale(it.get("f7")),
-            "hsl": _scale(it.get("f8")),
-            "zhuli": it.get("f62"),
-            "industry": it.get("f100"),
+            "zf": round(it.get("zdp") or 0, 2),     # 涨幅 %
+            "days": z.get("days"),                   # 几天
+            "boards": z.get("ct"),                   # 几板（连板高度）
+            "hsl": round(it.get("hs") or 0, 2),      # 换手 %
+            "turnover": it.get("amount") or 0,       # 成交额 (元)
+            "fund": it.get("fund") or 0,             # 封单额 (元)
+            "zbc": it.get("zbc") or 0,               # 炸板次数
+            "hybk": it.get("hybk") or "",            # 题材/行业板块
+            "ltsz": it.get("ltsz") or 0,             # 流通市值 (元)
         })
+    result.sort(key=lambda x: (-(x["boards"] or 0), -(x["turnover"] or 0)))
+    return result
+
+
+def get_top_volume(n=20):
+    """新浪取沪深A股成交额前 N 的个股快照。"""
+    try:
+        r = requests.get(
+            SINA_RANK_URL,
+            params={"page": 1, "num": n, "sort": "amount", "asc": 0, "node": "hs_a"},
+            headers=SINA_HEADERS, timeout=8,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _sina_zhuli(symbol):
+    """取单只最新主力净流入(r0_net, 元)。symbol 形如 sz300308。"""
+    try:
+        r = requests.get(SINA_FLOW_URL, params={"daima": symbol}, headers=SINA_HEADERS, timeout=6)
+        arr = r.json()
+        if isinstance(arr, list) and arr:
+            return float(arr[0].get("r0_net") or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
+def parse_top_volume(raw):
+    """重命名字段、过滤 B 股/ST/退市/无成交，并并发补主力净额。"""
+    result = []
+    for it in raw:
+        code = str(it.get("code") or "")
+        name = it.get("name") or ""
+        symbol = it.get("symbol") or ""
+        if not code or code.startswith(("900", "200")) or "ST" in name.upper() or "退" in name:
+            continue
+        amount = _num(it.get("amount")) or 0
+        if not amount:
+            continue  # 成交额为 0 直接丢弃（盘前/休市占位）
+        settle, high, low = _num(it.get("settlement")), _num(it.get("high")), _num(it.get("low"))
+        amp = round((high - low) / settle * 100, 2) if settle and high is not None and low is not None else None
+        result.append({
+            "code": code,
+            "symbol": symbol,
+            "name": name,
+            "price": _num(it.get("trade")),
+            "zf": _num(it.get("changepercent")),
+            "turnover": amount,
+            "amp": amp,
+            "hsl": _num(it.get("turnoverratio")),
+            "zhuli": 0.0,        # 下面并发补
+            "industry": "",      # 新浪成交额榜不含行业
+        })
+
+    # 并发拉取每只的主力净流入，避免逐只串行拖慢刷新
+    if result:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for row, zhuli in zip(result, ex.map(lambda r: _sina_zhuli(r["symbol"]), result)):
+                row["zhuli"] = zhuli
+    for row in result:
+        row.pop("symbol", None)
     return result
 
 
@@ -255,7 +329,7 @@ def compute_capital_signals(parsed):
 
 
 def parse_jjyd(raw_list):
-    """竞价净额字段映射。来源 /data/getJjzhuliData/4（jjyd.dxx.js getZhuli()），每行：
+    """竞价净额字段映射。来源 duanxianxia jjzhuli（解密后），每行 9 字段：
     [代码, 名称, 竞价涨幅%, 现价涨幅%, 竞价主力净额(万), 竞额(万), 流通市值(亿), 概念, 竞价换手%]
     """
     result = []
@@ -264,7 +338,7 @@ def parse_jjyd(raw_list):
             continue
         code = str(it[0] or "")
         name = it[1]
-        if not code or code.startswith("9") or "ST" in str(name).upper():
+        if not code or code.startswith("9") or "ST" in str(name).upper() or "退" in str(name):
             continue
         result.append({
             "code": code,
@@ -336,6 +410,9 @@ if __name__ == "__main__":
     jjyd = parse_jjyd(get_jjyd()) or prev.get("jjyd", [])
     top_volume = parse_top_volume(get_top_volume(20)) or prev.get("top_volume", [])
     capital_signals = compute_capital_signals(top_volume) if top_volume else prev.get("capital_signals", {})
+    zt_raw, zt_date = get_zt_pool()
+    zt_pool = parse_zt_pool(zt_raw) or prev.get("zt_pool", [])
+    zt_date = zt_date or prev.get("zt_date", "")
 
     with open(data_path, "w", encoding="utf-8") as f:
         json.dump({
@@ -345,5 +422,7 @@ if __name__ == "__main__":
             "jjyd": jjyd,
             "top_volume": top_volume,
             "capital_signals": capital_signals,
+            "zt_pool": zt_pool,
+            "zt_date": zt_date,
         }, f, ensure_ascii=False, indent=2)
-    print(f"saved: lhb={len(result)} jjyd={len(jjyd)} top_volume={len(top_volume)}")
+    print(f"saved: lhb={len(result)} jjyd={len(jjyd)} top_volume={len(top_volume)} zt={len(zt_pool)}")

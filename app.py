@@ -10,6 +10,7 @@ from scraper import (
     fetch_multi_day_lhb,
     get_jjyd, parse_jjyd,
     get_top_volume, parse_top_volume, compute_capital_signals,
+    get_zt_pool, parse_zt_pool,
 )
 
 CN_TZ = timezone(timedelta(hours=8))
@@ -31,10 +32,14 @@ _cache = {
     "top_volume": [],
     "capital_signals": {},
     "capital_at": 0.0,
+    "zt_pool": [],
+    "zt_date": "",
+    "zt_at": 0.0,
 }
 _lhb_lock = threading.Lock()
 _jjyd_lock = threading.Lock()
 _capital_lock = threading.Lock()
+_zt_lock = threading.Lock()
 
 
 def _load_from_disk():
@@ -48,6 +53,8 @@ def _load_from_disk():
         _cache["jjyd"] = d.get("jjyd", [])
         _cache["top_volume"] = d.get("top_volume", [])
         _cache["capital_signals"] = d.get("capital_signals", {})
+        _cache["zt_pool"] = d.get("zt_pool", [])
+        _cache["zt_date"] = d.get("zt_date", "")
         _cache["updated_at"] = d.get("updated_at", "")
         return bool(_cache["data"])
     except Exception:
@@ -66,6 +73,8 @@ def _save_to_disk():
                 "jjyd": _cache["jjyd"],
                 "top_volume": _cache["top_volume"],
                 "capital_signals": _cache["capital_signals"],
+                "zt_pool": _cache["zt_pool"],
+                "zt_date": _cache["zt_date"],
             }, f, ensure_ascii=False)
         os.replace(tmp, DATA_FILE)
     except Exception:
@@ -141,10 +150,35 @@ def refresh_capital_if_stale():
         _capital_lock.release()
 
 
+def refresh_zt_if_stale():
+    ttl = 30 if _is_trading_hours() else 600
+    if time_mod.time() - _cache["zt_at"] < ttl and _cache["zt_pool"]:
+        return
+    if not _zt_lock.acquire(blocking=False):
+        return
+    try:
+        if time_mod.time() - _cache["zt_at"] < ttl and _cache["zt_pool"]:
+            return
+        raw, qdate = get_zt_pool()
+        pool = parse_zt_pool(raw)
+        if pool:
+            _cache["zt_pool"] = pool
+            _cache["zt_date"] = qdate
+            _cache["zt_at"] = time_mod.time()
+            _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            _cache["zt_at"] = time_mod.time() - ttl + ttl / 2
+    except Exception:
+        _cache["zt_at"] = time_mod.time() - ttl + ttl / 2
+    finally:
+        _zt_lock.release()
+
+
 if not _load_from_disk():
     refresh_lhb()
 threading.Thread(target=refresh_jjyd_if_stale, daemon=True).start()
 threading.Thread(target=refresh_capital_if_stale, daemon=True).start()
+threading.Thread(target=refresh_zt_if_stale, daemon=True).start()
 
 scheduler = BackgroundScheduler(timezone=CN_TZ)
 scheduler.add_job(refresh_lhb, "cron", day_of_week="mon-fri", hour=18, minute=30)
@@ -156,6 +190,7 @@ atexit.register(lambda: scheduler.shutdown())
 def index():
     refresh_jjyd_if_stale()
     refresh_capital_if_stale()
+    refresh_zt_if_stale()
     return render_template(
         "index.html",
         updated_at=_cache["updated_at"],
@@ -164,6 +199,8 @@ def index():
         jjyd=_cache["jjyd"],
         top_volume=_cache["top_volume"],
         capital_signals=_cache["capital_signals"],
+        zt_pool=_cache["zt_pool"],
+        zt_date=_cache["zt_date"],
     )
 
 
@@ -174,6 +211,7 @@ def healthz():
         "lhb": len(_cache["data"]),
         "jjyd": len(_cache["jjyd"]),
         "top_volume": len(_cache["top_volume"]),
+        "zt_pool": len(_cache["zt_pool"]),
     }
 
 
