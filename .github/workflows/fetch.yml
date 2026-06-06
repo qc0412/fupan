@@ -1,9 +1,8 @@
 name: Fetch LHB Data
 
+# 定时已停用：数据改由云服务器 (systemd fupan.service) 内置 APScheduler 18:30 自抓并落盘。
+# 仅保留手动触发入口，平时不会运行。
 on:
-  schedule:
-    - cron: '10 9 * * 1-5'  # 北京时间 17:10，周一到周五
-    - cron: '0 10 * * 1-5'  # 北京时间 18:00，周一到周五
   workflow_dispatch:
 
 permissions:
