@@ -5,3 +5,10 @@ __pycache__/
 .venv/
 frontend/node_modules/
 frontend/dist/
+
+# skill 运行时缓存/状态/产物（不入库）
+.claude/skills/**/.cache/
+.claude/skills/**/mx_data_output/
+
+# 复盘自动发布日志
+.publish_reviews.log

@@ -1,0 +1,6 @@
+# fupan 复盘自动发布 —— 每 10 分钟扫描 /fupan、/jieli 的新报告，
+# 落盘到 data/reviews/（本机即线上，落盘即生效）并提交+推送到 dev。
+# 安装：crontab /home/ubuntu/fupan/scripts/fupan.crontab
+# 查看日志：tail -f /home/ubuntu/fupan/.publish_reviews.log
+PATH=/usr/local/bin:/usr/bin:/bin
+*/10 * * * * /usr/bin/python3 /home/ubuntu/fupan/scripts/publish_reviews.py >> /home/ubuntu/fupan/.publish_reviews.log 2>&1
