@@ -54,6 +54,24 @@ def _load_from_disk():
         return False
 
 
+def _save_to_disk():
+    """把当前缓存写回 data/data.json，使服务器重启后能读到最新数据。"""
+    try:
+        tmp = DATA_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({
+                "updated_at": _cache["updated_at"],
+                "trading_days": _cache["trading_days"],
+                "data": _cache["data"],
+                "jjyd": _cache["jjyd"],
+                "top_volume": _cache["top_volume"],
+                "capital_signals": _cache["capital_signals"],
+            }, f, ensure_ascii=False)
+        os.replace(tmp, DATA_FILE)
+    except Exception:
+        pass
+
+
 def refresh_lhb():
     if not _lhb_lock.acquire(blocking=False):
         return
@@ -63,6 +81,7 @@ def refresh_lhb():
             _cache["data"] = data
             _cache["trading_days"] = days
             _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
+            _save_to_disk()
     finally:
         _lhb_lock.release()
 
