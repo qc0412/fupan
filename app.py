@@ -204,6 +204,24 @@ def index():
     )
 
 
+@app.route("/api/data")
+def api_data():
+    """前端 SPA 数据接口：触发 TTL 刷新后返回全部四块数据。"""
+    refresh_jjyd_if_stale()
+    refresh_capital_if_stale()
+    refresh_zt_if_stale()
+    return {
+        "updated_at": _cache["updated_at"],
+        "data": _cache["data"],
+        "trading_days": _cache["trading_days"],
+        "jjyd": _cache["jjyd"],
+        "top_volume": _cache["top_volume"],
+        "capital_signals": _cache["capital_signals"],
+        "zt_pool": _cache["zt_pool"],
+        "zt_date": _cache["zt_date"],
+    }
+
+
 @app.route("/healthz")
 def healthz():
     return {

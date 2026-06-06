@@ -1,0 +1,71 @@
+<script setup>
+import { computed } from 'vue'
+import { useMarketStore } from '../../stores/market'
+import { fmtYuan, moneyClass } from '../../composables/format'
+import TempGauge from '../TempGauge.vue'
+
+const store = useMarketStore()
+const cs = computed(() => store.capitalSignals || {})
+const hasData = computed(() => store.topVolume.length > 0 && cs.value.temp != null)
+
+const up = computed(() => cs.value.up_count || 0)
+const down = computed(() => cs.value.down_count || 0)
+const flat = computed(() => cs.value.flat_count || 0)
+const ratio = computed(() => (down.value > 0 ? (up.value / down.value).toFixed(2) : up.value ? '∞' : '0'))
+const avg = computed(() => cs.value.avg_zf ?? 0)
+const sumZhuli = computed(() => cs.value.sum_zhuli || 0)
+</script>
+
+<template>
+  <div class="card">
+    <div class="capital-hero">
+      <TempGauge :temp="cs.temp" :has-data="hasData" />
+      <div class="capital-stats">
+        <div class="stat">
+          <span class="label">红绿比</span>
+          <span class="val">
+            <span class="money-up">{{ up }}红</span> / <span class="money-down">{{ down }}绿</span><span v-if="flat"> · {{ flat }}平</span>
+            <span style="color:#999;font-weight:400;font-size:0.78rem"> ({{ ratio }})</span>
+          </span>
+        </div>
+        <div class="stat">
+          <span class="label">平均涨幅</span>
+          <span class="val"><span :class="moneyClass(avg)">{{ avg > 0 ? '+' : '' }}{{ avg }}%</span></span>
+        </div>
+        <div class="stat">
+          <span class="label">合计成交</span>
+          <span class="val">{{ fmtYuan(cs.sum_turnover || 0) }}</span>
+        </div>
+        <div class="stat">
+          <span class="label">主力净额</span>
+          <span class="val"><span :class="moneyClass(sumZhuli)">{{ sumZhuli >= 0 ? '+' : '-' }}{{ fmtYuan(Math.abs(sumZhuli)) }}</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="signals">
+      <span v-for="(s, i) in cs.signals || []" :key="i" class="signal" :class="s.type">
+        {{ s.label }}<span v-if="s.tip" class="tip">{{ s.tip }}</span>
+      </span>
+    </div>
+
+    <div v-if="!store.topVolume.length" class="empty">暂无数据（盘前/休市时段或抓取失败）</div>
+    <table v-else class="top-volume-table">
+      <thead><tr>
+        <th>股票</th><th>涨幅</th><th>成交额</th><th>主力净额</th>
+        <th class="col-hsl">换手</th><th class="col-amp">振幅</th><th>行业</th>
+      </tr></thead>
+      <tbody>
+        <tr v-for="(s, i) in store.topVolume" :key="s.code">
+          <td><span class="rank">{{ i + 1 }}</span><span class="stock-name">{{ s.name }}</span><div class="stock-code">{{ s.code }}</div></td>
+          <td><span :class="moneyClass(s.zf)">{{ Number(s.zf) > 0 ? '+' : '' }}{{ Number(s.zf) || 0 }}%</span></td>
+          <td>{{ fmtYuan(s.turnover) }}</td>
+          <td><span :class="moneyClass(s.zhuli)">{{ Number(s.zhuli) ? (Number(s.zhuli) >= 0 ? '+' : '-') + fmtYuan(Math.abs(Number(s.zhuli))) : '--' }}</span></td>
+          <td class="col-hsl">{{ s.hsl != null ? s.hsl + '%' : '--' }}</td>
+          <td class="col-amp">{{ s.amp != null ? s.amp + '%' : '--' }}</td>
+          <td><div class="industry">{{ s.industry || '' }}</div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>

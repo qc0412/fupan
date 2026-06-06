@@ -3,3 +3,5 @@ __pycache__/
 .cookie_cache
 .DS_Store
 .venv/
+frontend/node_modules/
+frontend/dist/
