@@ -93,13 +93,13 @@ def get_lhb(date_str):
 
 
 def get_jjyd():
-    """抓取竞价异动数据（/mob/jjyd 页面背后的 /api/getDabanData 接口）。"""
+    """抓取竞价净额数据（/mob/jjyd 页面"竞价净额"tab，背后接口 /data/getJjzhuliData/4，按竞价主力净额降序）。"""
     global _session
     for attempt in range(2):
         try:
             s = _get_session()
             r = s.post(
-                BASE_URL + "/api/getDabanData/",
+                BASE_URL + "/data/getJjzhuliData/4",
                 headers={"Referer": BASE_URL + "/mob/jjyd/4ac6af32a6ffc014"},
                 timeout=10,
             )
@@ -255,27 +255,27 @@ def compute_capital_signals(parsed):
 
 
 def parse_jjyd(raw_list):
-    """把数组型字段转成命名字段。索引含义参考 /static/js/jjyd.dxx.js getDaban()。"""
+    """竞价净额字段映射。来源 /data/getJjzhuliData/4（jjyd.dxx.js getZhuli()），每行：
+    [代码, 名称, 竞价涨幅%, 现价涨幅%, 竞价主力净额(万), 竞额(万), 流通市值(亿), 概念, 竞价换手%]
+    """
     result = []
     for it in raw_list:
-        if not it or len(it) < 18:
+        if not it or len(it) < 9:
             continue
-        code = it[0]
+        code = str(it[0] or "")
         name = it[1]
         if not code or code.startswith("9") or "ST" in str(name).upper():
             continue
         result.append({
             "code": code,
             "name": name,
+            "jjzf": it[2],          # 竞价涨幅 %
             "zf": it[3],            # 现价涨幅 %
-            "weimai": it[4],        # 委买金额 (元)
-            "jjzf": it[5],          # 集合竞价涨幅 % ('none' 表示无)
-            "zhuli": it[6],         # 主力净额 (元)
-            "cuohe": it[10],        # 撮合金额 (元)
-            "concept": it[11],      # 概念
-            "ltsz": it[12],         # 流通市值 (元)
-            "ban": it[16],          # 板信息 (如 "3连板"、"首板")
-            "fengdan": it[17],      # 封单 (万元)
+            "zhuli": it[4],         # 竞价主力净额 (万元) —— 即"竞价净额"
+            "jje": it[5],           # 竞额 (万元)
+            "ltsz": it[6],          # 流通市值 (亿元)
+            "concept": it[7],       # 概念
+            "jjhs": it[8],          # 竞价换手 %
         })
     return result
 
@@ -304,7 +304,7 @@ def fetch_multi_day_lhb():
                 continue
             seen.add(code)
             name = item["info"]["name"]
-            if code.startswith("9") or "ST" in name.upper():
+            if code.startswith("9") or "ST" in name.upper() or "退" in name:
                 continue
             if code not in stock_map:
                 stock_map[code] = {"name": name, "code": code, "appearances": []}

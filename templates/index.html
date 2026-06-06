@@ -100,7 +100,7 @@
 <div class="main">
   <div class="tabs">
     <div class="tab active" data-pane="lhb">多次上榜</div>
-    <div class="tab" data-pane="jjyd">竞价异动</div>
+    <div class="tab" data-pane="jjyd">竞价净额</div>
     <div class="tab" data-pane="capital">大资金情绪</div>
   </div>
   <div class="meta">更新时间：{{ updated_at }} (北京时间)</div>
@@ -145,16 +145,12 @@
   <div class="pane" id="pane-jjyd">
     <div class="card">
       <div class="filters">
-        <button class="filter-btn jjyd-btn active" data-mode="all">全部</button>
-        <button class="filter-btn jjyd-btn" data-mode="lianban">仅连板</button>
-        <button class="filter-btn jjyd-btn" data-mode="shouban">仅首板</button>
-        <div class="filter-sep"></div>
         <span class="filter-label">排序</span>
-        <button class="filter-btn sort-btn active" data-sort="zhuli">主力净额</button>
-        <button class="filter-btn sort-btn" data-sort="weimai">委买</button>
-        <button class="filter-btn sort-btn" data-sort="cuohe">撮合</button>
-        <button class="filter-btn sort-btn" data-sort="jjzf">竞价涨幅</button>
-        <button class="filter-btn sort-btn" data-sort="fengdan">封单</button>
+        <button class="filter-btn sort-btn active" data-sort="zhuli">竞价净额</button>
+        <button class="filter-btn sort-btn" data-sort="jje">竞额</button>
+        <button class="filter-btn sort-btn" data-sort="jjzf">竞涨</button>
+        <button class="filter-btn sort-btn" data-sort="zf">涨幅</button>
+        <button class="filter-btn sort-btn" data-sort="jjhs">竞价换手</button>
       </div>
       <div class="dates" id="jjyd-summary"></div>
       <div id="jjyd-content"></div>
@@ -222,9 +218,8 @@ document.querySelectorAll('.lhb-btn').forEach(btn => {
 
 render();
 
-// 竞价异动
+// 竞价净额
 const jjydRaw = {{ jjyd | tojson }};
-let jjydMode = 'all';
 let jjydSort = 'zhuli';
 
 function sortKey(s, key) {
@@ -241,102 +236,70 @@ function fmtYuan(v) {
   if (abs >= 1e4) return Math.round(v / 1e4) + '万';
   return v.toString();
 }
-function fmtWan(v) {
+// 竞价净额 / 竞额 原始单位为「万元」
+function fmtWanUnit(v) {
   v = Number(v) || 0;
   const abs = Math.abs(v);
   if (abs >= 1e4) return (v / 1e4).toFixed(1) + '亿';
   return Math.round(v) + '万';
 }
-function banClass(ban) {
-  if (!ban) return '';
-  if (/首板/.test(ban)) return 'first';
-  if (/连板|天.板/.test(ban)) return 'lianban';
-  return '';
-}
-function lianbanCount(ban) {
-  if (!ban) return 0;
-  let m = ban.match(/(\d+)\s*连板/);
-  if (m) return parseInt(m[1]);
-  m = ban.match(/(\d+)\s*天\s*(\d+)\s*板/);
-  if (m) return parseInt(m[2]);
-  if (/首板/.test(ban)) return 1;
-  return 0;
-}
 
 function renderJjyd() {
   let list = jjydRaw.slice();
-  if (jjydMode === 'lianban') {
-    list = list.filter(s => lianbanCount(s.ban) >= 2);
-  } else if (jjydMode === 'shouban') {
-    list = list.filter(s => /首板/.test(s.ban || ''));
-  }
   list.sort((a, b) => sortKey(b, jjydSort) - sortKey(a, jjydSort));
 
-  const sortLabels = { zhuli: '主力净额', weimai: '委买', cuohe: '撮合', jjzf: '竞价涨幅', fengdan: '封单' };
+  const sortLabels = { zhuli: '竞价净额', jje: '竞额', jjzf: '竞价涨幅', zf: '涨幅', jjhs: '竞价换手' };
   const summary = document.getElementById('jjyd-summary');
   const content = document.getElementById('jjyd-content');
   summary.textContent = list.length ? `共 ${list.length} 只，按${sortLabels[jjydSort]}降序` : '';
 
   if (!list.length) {
-    content.innerHTML = '<div class="empty">暂无数据</div>';
+    content.innerHTML = '<div class="empty">暂无数据（交易日 09:25 后更新）</div>';
     return;
   }
 
   const rows = list.map(s => {
     const zf = Number(s.zf);
     const zfCls = zf > 0 ? 'money-up' : zf < 0 ? 'money-down' : '';
-    const jjzfRaw = s.jjzf;
-    let jjzfHtml = '';
-    if (jjzfRaw !== 'none' && jjzfRaw !== null && jjzfRaw !== undefined) {
-      const jv = Number(jjzfRaw);
-      jjzfHtml = `<div class="pct-jj">竞${jv > 0 ? '+' : ''}${jjzfRaw}%</div>`;
-    }
     const zfHtml = `<div class="${zfCls}">${zf > 0 ? '+' : ''}${s.zf}%</div>`;
+
+    const jjzf = Number(s.jjzf);
+    let jjzfHtml = '';
+    if (!isNaN(jjzf)) {
+      jjzfHtml = `<div class="pct-jj">竞${jjzf > 0 ? '+' : ''}${s.jjzf}%</div>`;
+    }
 
     const zhuli = Number(s.zhuli) || 0;
     const zhuliCls = zhuli > 0 ? 'money-up' : zhuli < 0 ? 'money-down' : '';
-    const zhuliText = zhuli ? fmtYuan(zhuli) : '--';
-
-    const banCls = banClass(s.ban);
-    const banHtml = s.ban ? `<span class="ban-tag ${banCls}">${s.ban}</span>` : '';
+    const zhuliText = zhuli ? fmtWanUnit(zhuli) : '--';
 
     return `<tr>
       <td>
         <div class="stock-name">${s.name}</div>
         <div class="stock-code">${s.code}</div>
-        ${banHtml}
       </td>
       <td>${jjzfHtml}${zfHtml}</td>
-      <td><div class="pair"><span class="v1">${fmtYuan(s.weimai)}</span><br>${fmtYuan(s.cuohe)}</div></td>
-      <td><span class="${zhuliCls}">${zhuliText}</span></td>
-      <td class="col-fd">${s.fengdan ? fmtWan(s.fengdan) : '--'}</td>
-      <td class="col-ltsz">${fmtYuan(s.ltsz)}</td>
-      <td><div class="concept">${(s.concept || '').replace('、', '<br>')}</div></td>
+      <td><span class="${zhuliCls}" style="font-weight:600;">${zhuliText}</span></td>
+      <td>${fmtWanUnit(s.jje)}</td>
+      <td>${Number(s.jjhs)}%</td>
+      <td class="col-ltsz">${Number(s.ltsz).toFixed(0)}亿</td>
+      <td><div class="concept">${(s.concept || '').replace(/\|/g, '<br>')}</div></td>
     </tr>`;
   }).join('');
 
   content.innerHTML = `<table class="jjyd-table">
     <thead><tr>
-      <th>股票/板</th>
+      <th>股票</th>
       <th>竞价/现价</th>
-      <th>委买/撮合</th>
-      <th>主力</th>
-      <th class="col-fd">封单</th>
+      <th>竞价净额</th>
+      <th>竞额</th>
+      <th>竞价换手</th>
       <th class="col-ltsz">流通</th>
       <th>概念</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
-
-document.querySelectorAll('.jjyd-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.jjyd-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    jjydMode = btn.dataset.mode;
-    renderJjyd();
-  });
-});
 
 document.querySelectorAll('.sort-btn').forEach(btn => {
   btn.addEventListener('click', () => {
