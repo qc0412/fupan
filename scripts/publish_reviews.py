@@ -94,25 +94,96 @@ def publish_jingjia():
 
 # ---------- jieli：从盯盘池 JSON 渲染 markdown ----------
 
-def _fmt_three_std(s):
-    if not isinstance(s, dict):
-        return ""
-    parts = []
-    for k in ("板块最高", "带动性", "资金最猛", "明细"):
-        if k in s:
-            parts.append(f"{k}={s[k]}")
-    return " ｜ ".join(str(p) for p in parts)
+def _cell(x):
+    """安全写进 markdown 表格单元格：转字符串、去换行、转义竖线。"""
+    s = "" if x is None else str(x)
+    return s.replace("\n", " ").replace("|", "\\|").strip()
 
 
-def _fmt_5q(q):
-    if not isinstance(q, dict):
-        return ""
-    return " / ".join(f"{k}:{v}" for k, v in q.items())
+def _count(v):
+    """把跟风条目数化：list→长度，数字→自身，纯数字串→int，
+    含数字的描述串→取首个数字，非数字描述串→None（未知）。"""
+    if v is None:
+        return 0
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, (list, tuple)):
+        return len(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return 0
+        if re.fullmatch(r"\d+", s):
+            return int(s)
+        m = re.search(r"\d+", s)
+        return int(m.group()) if m else None
+    return None
+
+
+def _follower_counts(gf):
+    """从跟风清单导出 (连板跟风数, 首板跟风数, 合计)，鲁棒处理串/表/数。"""
+    if not isinstance(gf, dict):
+        return None, None, None
+    lb = _count(gf.get("连板跟风"))
+    sb_raw = gf.get("首板跟风")
+    if sb_raw is None and "首板跟风数" in gf:
+        sb_raw = gf.get("首板跟风数")
+    sb = _count(sb_raw)
+    total = gf.get("合计")
+    if isinstance(total, bool):
+        total = None
+    if isinstance(total, (int, float)):
+        tot = int(total)
+    elif isinstance(total, str) and re.fullmatch(r"\s*\d+\s*", total):
+        tot = int(total)
+    elif lb is not None and sb is not None:
+        tot = lb + sb
+    else:
+        tot = None
+    return lb, sb, tot
+
+
+def _board_height(v):
+    """从连板数字段抽取连板高度：'6天6板'→6，'4板'→4，'连续2板(...)'→2。"""
+    if isinstance(v, bool):
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        m = re.search(r"(\d+)\s*板", v)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"\d+", v)
+        if m:
+            return int(m.group())
+    return 0
+
+
+def _amount(v):
+    """成交额化为可比较的数值（统一到“亿”量级），无法解析返回 None。"""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        m = re.search(r"(\d+(?:\.\d+)?)", v)
+        if m:
+            x = float(m.group(1))
+            if "万" in v and "亿" not in v:
+                x /= 10000.0
+            return x
+    return None
+
+
+def _fc(x):
+    return "?" if x is None else str(x)
 
 
 def render_jieli(pool):
     date = pool.get("date", "")
-    mk = pool.get("market", {})
+    mk = pool.get("market", {}) or {}
     lines = [f"# 🎯 连板接力盯盘池 · {date}", ""]
 
     if pool.get("baseline"):
@@ -121,56 +192,121 @@ def render_jieli(pool):
         lines.append("> 框架：jieli「真龙三标准」逐只判定（含昨日盯盘池 D2 升降级）。")
     lines.append("")
 
+    # --- 市场格局：精简表，昨日待验证闭环单独成行 ---
+    d2 = mk.get("昨日待验证闭环")
     if mk:
         lines.append("## 市场格局")
         lines.append("")
         lines.append("| 指标 | 数值 |")
         lines.append("|---|---|")
         for k, v in mk.items():
-            lines.append(f"| {k} | {v} |")
+            if k == "昨日待验证闭环":
+                continue
+            lines.append(f"| {_cell(k)} | {_cell(v)} |")
+        lines.append("")
+    if d2:
+        lines.append(f"**昨日待验证闭环（D2）**：{_cell(d2)}")
         lines.append("")
 
-    pr = pool.get("platerotat_top")
-    if isinstance(pr, dict) and pr:
-        segs = []
-        for name, info in pr.items():
-            if isinstance(info, dict):
-                bits = [str(info.get(x)) for x in ("rank", "trend", "周期") if info.get(x) is not None]
-                segs.append(f"{name}（{'·'.join(bits)}）" if bits else name)
+    # --- 预计算每只 2板+ 个股的派生量 ---
+    raw_stocks = pool.get("stocks", []) or []
+    items = []
+    for s in raw_stocks:
+        height = _board_height(s.get("连板数"))
+        if height < 2:
+            continue
+        lb, sb, tot = _follower_counts(s.get("跟风清单"))
+        items.append({
+            "s": s,
+            "height": height,
+            "lb": lb, "sb": sb, "tot": tot,
+            "amt": _amount(s.get("成交")),
+            "sector": (s.get("主板块") or "").strip() or "未分类",
+        })
+
+    # 板块内每只最高连板高度
+    sector_max = {}
+    for it in items:
+        sector_max[it["sector"]] = max(sector_max.get(it["sector"], 0), it["height"])
+    sector_max_cnt = {}
+    for it in items:
+        if it["height"] == sector_max[it["sector"]]:
+            sector_max_cnt[it["sector"]] = sector_max_cnt.get(it["sector"], 0) + 1
+
+    def _status(it):
+        if it["height"] == sector_max[it["sector"]]:
+            return "并列最高" if sector_max_cnt[it["sector"]] > 1 else "最高板"
+        if it["tot"] == 0:
+            return "独苗"
+        return "跟风"
+
+    # --- 主表：每只 2板+ 一行 ---
+    if items:
+        lines.append(f"## 连板主体一览（{len(items)} 只 · 2板+）")
+        lines.append("")
+        lines.append("| 票 | 连板 | 主板块 | 板块内地位 | 跟风(连板/首板/合计) | 龙头判定 | 核心证据 |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for it in items:
+            s = it["s"]
+            evid = ""
+            std = s.get("真龙三标准")
+            if isinstance(std, dict) and std.get("明细"):
+                evid = std["明细"]
             else:
-                segs.append(f"{name}（{info}）")
-        lines.append("**板块强度（platerotat）**：" + " ｜ ".join(segs))
+                bits = [b for b in (s.get("成交"), s.get("炸板次数") is not None and f"炸板{s['炸板次数']}次") if b]
+                evid = " ｜ ".join(str(b) for b in bits)
+            flw = f"{_fc(it['lb'])}/{_fc(it['sb'])}/{_fc(it['tot'])}"
+            lines.append(
+                f"| {_cell(s.get('name',''))}({_cell(s.get('code',''))}) "
+                f"| {_cell(s.get('连板数',''))} | {_cell(it['sector'])} "
+                f"| {_cell(_status(it))} | {flw} "
+                f"| {_cell(s.get('龙头判定',''))} | {_cell(evid)} |"
+            )
         lines.append("")
 
-    stocks = pool.get("stocks", [])
-    if stocks:
-        lines.append(f"## 连板主体逐只判定（{len(stocks)} 只）")
+    # --- 板块龙头小结：每个出现过的板块一行 ---
+    sectors = []
+    for it in items:
+        if it["sector"] not in sectors:
+            sectors.append(it["sector"])
+    if sectors:
+        lines.append("## 板块龙头小结")
         lines.append("")
-        for s in stocks:
-            verdict = s.get("龙头判定", "")
-            lines.append(f"### {verdict} {s.get('name','')}({s.get('code','')})")
-            meta = []
-            for k in ("连板数", "炸板次数", "成交", "换手", "主板块"):
-                if s.get(k) not in (None, ""):
-                    meta.append(f"{k} {s[k]}")
-            if meta:
-                lines.append("- " + " ｜ ".join(str(x) for x in meta))
-            if s.get("类型"):
-                lines.append(f"- 类型：{s['类型']} ｜ 板块周期：{s.get('板块周期','')} ｜ 接力价值：{s.get('接力价值','')}")
-            std = _fmt_three_std(s.get("真龙三标准"))
-            if std:
-                lines.append(f"- 真龙三标准：{std}")
-            q5 = _fmt_5q(s.get("分歧日5问"))
-            if q5:
-                lines.append(f"- 分歧日5问：{q5}")
-            if s.get("待验证") and s.get("D2验证日期"):
-                lines.append(f"- ⏸️ 待验证 → D2 验证日 **{s['D2验证日期']}**")
-            lines.append("")
+        lines.append("| 板块 | 龙头 | 高度 | 跟风(连板/首板/合计) | 板块结论 |")
+        lines.append("|---|---|---|---|---|")
+        for sec in sectors:
+            members = [it for it in items if it["sector"] == sec]
+            leader = sorted(
+                members,
+                key=lambda it: (
+                    it["height"],
+                    it["tot"] if it["tot"] is not None else -1,
+                    it["amt"] if it["amt"] is not None else -1,
+                ),
+                reverse=True,
+            )[0]
+            ls = leader["s"]
+            tot = leader["tot"]
+            if tot is None:
+                concl = "跟风数据不全·待确认"
+            elif tot == 0:
+                concl = "独苗/事件驱动·无板块共振"
+            elif tot >= 3:
+                concl = "板块共振成立·龙头确立"
+            else:
+                concl = "弱共振·龙头待确认"
+            flw = f"{_fc(leader['lb'])}/{_fc(leader['sb'])}/{_fc(leader['tot'])}"
+            lines.append(
+                f"| {_cell(sec)} | {_cell(ls.get('name',''))}({_cell(ls.get('code',''))}) "
+                f"| {leader['height']}板 | {flw} | {_cell(concl)} |"
+            )
+        lines.append("")
 
+    # --- 结论：summary 作为精炼收口 ---
     if pool.get("summary"):
         lines.append("## 盯盘池结论")
         lines.append("")
-        lines.append("> " + pool["summary"])
+        lines.append("> " + _cell(pool["summary"]))
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
