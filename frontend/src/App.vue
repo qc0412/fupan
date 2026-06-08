@@ -2,17 +2,17 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from './stores/market'
 import LhbTab from './components/tabs/LhbTab.vue'
-import ZtTab from './components/tabs/ZtTab.vue'
 import JjydTab from './components/tabs/JjydTab.vue'
 import CapitalTab from './components/tabs/CapitalTab.vue'
+import ReviewTab from './components/tabs/ReviewTab.vue'
 
 const tabs = [
-  { key: 'lhb', label: '多次上榜', comp: LhbTab },
-  { key: 'zt', label: '涨停板', comp: ZtTab },
-  { key: 'jjyd', label: '竞价净额', comp: JjydTab },
   { key: 'capital', label: '大资金情绪', comp: CapitalTab },
+  { key: 'lhb', label: '多次上榜', comp: LhbTab },
+  { key: 'jjyd', label: '竞价净额', comp: JjydTab },
+  { key: 'review', label: '复盘', comp: ReviewTab },
 ]
-const active = ref('lhb')
+const active = ref('capital')
 const store = useMarketStore()
 
 onMounted(() => store.startPolling())

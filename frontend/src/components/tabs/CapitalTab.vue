@@ -14,6 +14,9 @@ const flat = computed(() => cs.value.flat_count || 0)
 const ratio = computed(() => (down.value > 0 ? (up.value / down.value).toFixed(2) : up.value ? '∞' : '0'))
 const avg = computed(() => cs.value.avg_zf ?? 0)
 const sumZhuli = computed(() => cs.value.sum_zhuli || 0)
+const verifiedCount = computed(() => cs.value.verified_count ?? 0)
+const totalCount = computed(() => cs.value.total_count ?? store.topVolume.length)
+const allVerified = computed(() => totalCount.value > 0 && verifiedCount.value === totalCount.value)
 </script>
 
 <template>
@@ -49,6 +52,10 @@ const sumZhuli = computed(() => cs.value.sum_zhuli || 0)
       </span>
     </div>
 
+    <div v-if="hasData" class="data-quality" :class="{ ok: allVerified }">
+      {{ allVerified ? '✓' : '⚠' }} 东财×腾讯交叉验证 {{ verifiedCount }}/{{ totalCount }} 通过<span v-if="!allVerified">（存疑行主力净额已剔除出情绪聚合）</span>
+    </div>
+
     <div v-if="!store.topVolume.length" class="empty">暂无数据（盘前/休市时段或抓取失败）</div>
     <table v-else class="top-volume-table">
       <thead><tr>
@@ -56,11 +63,18 @@ const sumZhuli = computed(() => cs.value.sum_zhuli || 0)
         <th class="col-hsl">换手</th><th class="col-amp">振幅</th><th>行业</th>
       </tr></thead>
       <tbody>
-        <tr v-for="(s, i) in store.topVolume" :key="s.code">
-          <td><span class="rank">{{ i + 1 }}</span><span class="stock-name">{{ s.name }}</span><div class="stock-code">{{ s.code }}</div></td>
+        <tr v-for="(s, i) in store.topVolume" :key="s.code" :class="{ unverified: s.verified === false }">
+          <td>
+            <span class="rank">{{ i + 1 }}</span><span class="stock-name">{{ s.name }}</span>
+            <span v-if="s.verified === false" class="doubt" :title="(s.flags || []).join('；')">存疑</span>
+            <div class="stock-code">{{ s.code }}</div>
+          </td>
           <td><span :class="moneyClass(s.zf)">{{ Number(s.zf) > 0 ? '+' : '' }}{{ Number(s.zf) || 0 }}%</span></td>
           <td>{{ fmtYuan(s.turnover) }}</td>
-          <td><span :class="moneyClass(s.zhuli)">{{ Number(s.zhuli) ? (Number(s.zhuli) >= 0 ? '+' : '-') + fmtYuan(Math.abs(Number(s.zhuli))) : '--' }}</span></td>
+          <td>
+            <span v-if="s.zhuli == null" class="doubt" title="净额>成交额，物理不可能，已判废">判废</span>
+            <span v-else :class="moneyClass(s.zhuli)">{{ Number(s.zhuli) ? (Number(s.zhuli) >= 0 ? '+' : '-') + fmtYuan(Math.abs(Number(s.zhuli))) : '--' }}</span>
+          </td>
           <td class="col-hsl">{{ s.hsl != null ? s.hsl + '%' : '--' }}</td>
           <td class="col-amp">{{ s.amp != null ? s.amp + '%' : '--' }}</td>
           <td><div class="industry">{{ s.industry || '' }}</div></td>

@@ -72,8 +72,35 @@ tr:hover td { background: #fafafa; }
 .signal.ok { background: #ecfdf5; color: #16a34a; border: 1px solid #d1fae5; }
 .signal.neutral { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
 .signal .tip { color: #999; font-weight: 400; font-size: 0.7rem; margin-left: 2px; }
+.data-quality { padding: 8px 20px; font-size: 0.74rem; color: #c0392b; background: #fffaf5; border-bottom: 1px solid #f0f0f0; }
+.data-quality.ok { color: #16a34a; background: #f7fefb; }
+.doubt { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 600; color: #c0392b; background: #fff0f0; border: 1px solid #ffe0e0; cursor: help; }
+.top-volume-table tr.unverified { background: #fffaf5; }
 .top-volume-table .industry { font-size: 0.78rem; color: #888; }
 .top-volume-table .rank { color: #bbb; font-size: 0.78rem; margin-right: 6px; }
+
+/* 复盘 Tab */
+.review-bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; }
+.review-date { font-size: 0.85rem; padding: 6px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; color: #333; }
+.review-types { display: flex; gap: 6px; }
+.review-type { font-size: 0.82rem; padding: 6px 12px; border: 1px solid #ddd; border-radius: 999px; background: #fff; color: #666; cursor: pointer; transition: all .2s; }
+.review-type.active { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); color: #fff; border-color: transparent; }
+
+.markdown-body { padding: 16px 18px; font-size: 0.9rem; line-height: 1.7; color: #1a1a1a; word-wrap: break-word; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { line-height: 1.35; margin: 1.2em 0 .6em; }
+.markdown-body h1 { font-size: 1.4rem; } .markdown-body h2 { font-size: 1.2rem; border-bottom: 1px solid #f0f0f0; padding-bottom: .3em; } .markdown-body h3 { font-size: 1.05rem; }
+.markdown-body p { margin: .6em 0; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.4em; margin: .6em 0; }
+.markdown-body li { margin: .25em 0; }
+.markdown-body code { background: #f4f4f4; padding: .1em .35em; border-radius: 4px; font-size: 0.85em; }
+.markdown-body pre { background: #f6f8fa; padding: 12px; border-radius: 8px; overflow-x: auto; }
+.markdown-body pre code { background: none; padding: 0; }
+.markdown-body blockquote { margin: .6em 0; padding: .4em 1em; border-left: 3px solid #e74c3c; background: #fafafa; color: #555; }
+.markdown-body table { width: 100%; margin: .8em 0; font-size: 0.85rem; }
+.markdown-body th, .markdown-body td { border: 1px solid #eee; padding: 6px 10px; text-align: left; }
+.markdown-body th { background: #fafafa; }
+.markdown-body hr { border: none; border-top: 1px solid #eee; margin: 1.2em 0; }
+.markdown-body a { color: #c0392b; }
 
 @media (max-width: 640px) {
   .tab { padding: 9px 8px; font-size: 0.9rem; }

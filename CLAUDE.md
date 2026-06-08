@@ -53,6 +53,18 @@ pip install -r requirements.txt
 
 - `.claude/settings.local.json` 启用 `astock-data` MCP，提供实时 A 股行情查询。
 - 复盘任务调用 skill：日复盘 `fupan`、周复盘 `fupan-week`、龙头识别 `earlyLeader`。
+
+### 仓库内置 skill（`.claude/skills/`）
+
+`fupan`（A股短线龙头日复盘）和 `jieli`（连板接力盘后分析）已**随仓库版本管理**，输入 `/fupan`、`/jieli` 即可调用。注意它们是 **LLM 驱动**的分析任务（由 Claude 按框架逐只判定产出报告），不是能独立运行的脚本。
+
+- **目录结构**：`jieli/SKILL.md` 用相对路径 `../fupan/复盘心法-记忆补充.md` 引用 fupan 的心法补充，两个 skill 必须同在 `.claude/skills/` 下。skill 自带 py 脚本的 `sys.path` 已改为相对 `__file__`，仓库副本加载自身代码而非用户级 `~/.claude` 副本。
+- **外部前置依赖（不随仓库携带，需本机另装）**：
+  - `astock-data` MCP（`~/.claude/mcp-servers/astock-data`）— 实时行情，`fetch_realtime_data.py` / `premium_ladder.py` 依赖。
+  - `mx-data` skill（`~/.claude/skills/mx-data`）— `dfcf_data.py` 依赖。
+  - skill 真正吃的涨停池 / K线 / 板块强度仍走实时数据源，本项目 `data/data.json`（龙虎榜 + 竞价异动）只能作为**补充本地数据源**，替代不了上述实时部分。
+- **运行时产物已 gitignore**：`.claude/skills/**/.cache/`、`mx_data_output/`。
+- 同名 skill 在 `~/.claude/skills/` 下仍有用户级副本；项目级优先，长期维护注意两者别各改各的（建议以仓库内为准）。
 - 知识库文档：
   - `myMd/短线交易系统.md` — 交易体系（最强票选股逻辑、买卖条件、仓位管理）
   - `myMd/A股短线龙头复盘框架 V1.0（优化版）.md` — 评分框架

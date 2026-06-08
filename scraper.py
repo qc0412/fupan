@@ -2,7 +2,6 @@ import requests
 import time
 import os
 import json
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 CN_TZ = timezone(timedelta(hours=8))
@@ -130,139 +129,131 @@ def get_jjyd():
         return []
 
 
-# 新浪财经：沪深A股成交额排行 + 个股主力净流入。数据中心 IP 可直连，比东财稳定。
-SINA_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
-SINA_RANK_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
-SINA_FLOW_URL = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs"
+# 东财 push2：沪深A股成交额排行 + 实时主力净额（f62，盘中即时，非按日结算）。
+# 旧实现用新浪排行 + 逐只 MoneyFlow，但其 r0_net 按日结算：盘中拿到的是上一交易日
+# 全天净额，错配到当日实时成交额上，会出现"主力净额 > 当日成交额"的假信号。
+# 东财 clist 一次取数即得同一实时快照的 成交额(f6) 与 主力净额(f62)，两者自洽。
+EM_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+# 主站不通时回退镜像（push2delay 为分钟级延迟，仍同日自洽，远胜旧的跨日错配）
+EM_HOSTS = ["push2.eastmoney.com", "82.push2.eastmoney.com", "push2delay.eastmoney.com"]
+# 沪深A股：深主板(t:6)+创业板(t:80)+沪主板(t:2)+科创板(t:23)
+EM_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+# f12代码 f14名称 f2现价 f3涨幅 f6成交额(元) f8换手% f7振幅% f62主力净额(元) f100行业
+EM_FIELDS = "f12,f14,f2,f3,f6,f8,f7,f62,f100"
 
 
 def _num(v):
-    """安全转 float，失败返回 None。"""
+    """安全转 float，失败返回 None（东财用 '-' 表示无值）。"""
     try:
         return round(float(v), 2)
     except (TypeError, ValueError):
         return None
 
 
-# 东财涨停池：push2ex 子域，数据中心 IP 可直连（与被封的 push2 实时行情子域不同）。
-ZTPOOL_URL = "https://push2ex.eastmoney.com/getTopicZTPool"
-ZTPOOL_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
-
-
-def get_zt_pool(date_str=None):
-    """取东财涨停池。date_str=None 时从今天往前找最近一个有涨停数据的交易日。
-    返回 (pool 原始列表, qdate 字符串)。"""
-    if date_str:
-        candidates = [date_str]
-    else:
-        candidates = [(date.today() - timedelta(days=i)).strftime("%Y%m%d") for i in range(7)]
-    for d in candidates:
-        try:
-            r = requests.get(
-                ZTPOOL_URL,
-                params={"ut": "7eea3edcaed734bea9cbfc24409ed989", "dpt": "wz.ztzt",
-                        "Pageindex": 0, "pagesize": 300, "sort": "zttj:desc", "date": d},
-                headers=ZTPOOL_HEADERS, timeout=8,
-            )
-            r.raise_for_status()
-            data = (r.json() or {}).get("data") or {}
-            pool = data.get("pool") or []
-            if pool:
-                return pool, str(data.get("qdate") or d)
-        except Exception:
-            continue
-    return [], ""
-
-
-def parse_zt_pool(raw):
-    """涨停池字段映射：含连板高度(zttj)、封单、炸板次数、题材。剔除 ST/退市。
-    按连板高度降序、其次成交额。"""
-    result = []
-    for it in raw:
-        code = str(it.get("c") or "")
-        name = it.get("n") or ""
-        if not code or "ST" in name.upper() or "退" in name:
-            continue
-        z = it.get("zttj") or {}
-        result.append({
-            "code": code,
-            "name": name,
-            "zf": round(it.get("zdp") or 0, 2),     # 涨幅 %
-            "days": z.get("days"),                   # 几天
-            "boards": z.get("ct"),                   # 几板（连板高度）
-            "hsl": round(it.get("hs") or 0, 2),      # 换手 %
-            "turnover": it.get("amount") or 0,       # 成交额 (元)
-            "fund": it.get("fund") or 0,             # 封单额 (元)
-            "zbc": it.get("zbc") or 0,               # 炸板次数
-            "hybk": it.get("hybk") or "",            # 题材/行业板块
-            "ltsz": it.get("ltsz") or 0,             # 流通市值 (元)
-        })
-    result.sort(key=lambda x: (-(x["boards"] or 0), -(x["turnover"] or 0)))
-    return result
-
-
 def get_top_volume(n=20):
-    """新浪取沪深A股成交额前 N 的个股快照。"""
-    try:
-        r = requests.get(
-            SINA_RANK_URL,
-            params={"page": 1, "num": n, "sort": "amount", "asc": 0, "node": "hs_a"},
-            headers=SINA_HEADERS, timeout=8,
-        )
-        r.raise_for_status()
-        data = r.json()
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-
-
-def _sina_zhuli(symbol):
-    """取单只最新主力净流入(r0_net, 元)。symbol 形如 sz300308。"""
-    try:
-        r = requests.get(SINA_FLOW_URL, params={"daima": symbol}, headers=SINA_HEADERS, timeout=6)
-        arr = r.json()
-        if isinstance(arr, list) and arr:
-            return float(arr[0].get("r0_net") or 0)
-    except Exception:
-        pass
-    return 0.0
+    """东财取沪深A股成交额前 N 的实时快照（含实时主力净额 f62）。"""
+    params = {"pn": 1, "pz": n, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+              "fid": "f6", "fs": EM_FS, "fields": EM_FIELDS}
+    for attempt in range(2):  # 每轮把所有 host 试一遍，再退避重试
+        for host in EM_HOSTS:
+            try:
+                r = requests.get(f"https://{host}/api/qt/clist/get",
+                                 params=params, headers=EM_HEADERS, timeout=8)
+                r.raise_for_status()
+                diff = (r.json().get("data") or {}).get("diff") or []
+                if diff:
+                    return diff
+            except Exception:
+                continue
+        time.sleep(0.8 * (attempt + 1))
+    return []
 
 
 def parse_top_volume(raw):
-    """重命名字段、过滤 B 股/ST/退市/无成交，并并发补主力净额。"""
+    """东财字段映射、过滤 B 股/ST/退市/无成交。f62 为同一快照的实时主力净额(元)。"""
     result = []
     for it in raw:
-        code = str(it.get("code") or "")
-        name = it.get("name") or ""
-        symbol = it.get("symbol") or ""
+        code = str(it.get("f12") or "")
+        name = it.get("f14") or ""
         if not code or code.startswith(("900", "200")) or "ST" in name.upper() or "退" in name:
             continue
-        amount = _num(it.get("amount")) or 0
+        amount = _num(it.get("f6")) or 0
         if not amount:
             continue  # 成交额为 0 直接丢弃（盘前/休市占位）
-        settle, high, low = _num(it.get("settlement")), _num(it.get("high")), _num(it.get("low"))
-        amp = round((high - low) / settle * 100, 2) if settle and high is not None and low is not None else None
         result.append({
             "code": code,
-            "symbol": symbol,
             "name": name,
-            "price": _num(it.get("trade")),
-            "zf": _num(it.get("changepercent")),
+            "price": _num(it.get("f2")),
+            "zf": _num(it.get("f3")),
             "turnover": amount,
-            "amp": amp,
-            "hsl": _num(it.get("turnoverratio")),
-            "zhuli": 0.0,        # 下面并发补
-            "industry": "",      # 新浪成交额榜不含行业
+            "amp": _num(it.get("f7")),
+            "hsl": _num(it.get("f8")),
+            "zhuli": _num(it.get("f62")) or 0.0,
+            "industry": it.get("f100") or "",
         })
+    return _cross_validate(result)
 
-    # 并发拉取每只的主力净流入，避免逐只串行拖慢刷新
-    if result:
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            for row, zhuli in zip(result, ex.map(lambda r: _sina_zhuli(r["symbol"]), result)):
-                row["zhuli"] = zhuli
-    for row in result:
-        row.pop("symbol", None)
-    return result
+
+# 交叉验证：东财 f62 是单家黑箱口径，不盲信。用腾讯实时行情核对“客观事实”
+# (现价/涨幅/成交额)，再对主力净额做物理护栏。任一不过 → 标记存疑、不喂假值。
+TENCENT_Q_URL = "http://qt.gtimg.cn/q="
+
+
+def _tencent_quotes(codes):
+    """批量取腾讯实时行情。返回 {code: {price, pct, amount(元)}}。失败返回 {}。"""
+    if not codes:
+        return {}
+    syms = ",".join((("sh" if c.startswith("6") else "sz") + c) for c in codes)
+    try:
+        r = requests.get(TENCENT_Q_URL + syms, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        r.encoding = "gbk"
+    except Exception:
+        return {}
+    out = {}
+    for line in r.text.strip().split("\n"):
+        if '="' not in line:
+            continue
+        try:
+            parts = line.split('"')[1].split("~")
+            code = parts[2]
+            ti = next((i for i, v in enumerate(parts) if len(v) == 14 and v.isdigit()), None)
+            comb = next((v for v in parts if v.count("/") == 2), "")  # 现价/量/额
+            out[code] = {
+                "price": _num(parts[3]),
+                "pct": _num(parts[ti + 2]) if ti else None,
+                "amount": _num(comb.split("/")[2]) if comb else None,
+            }
+        except Exception:
+            continue
+    return out
+
+
+def _cross_validate(rows):
+    """逐行用腾讯行情交叉核对 + 主力净额物理护栏。给每行打 verified / zhuli 护栏。"""
+    tq = _tencent_quotes([r["code"] for r in rows])
+    for r in rows:
+        t = tq.get(r["code"]) or {}
+        flags = []
+        # 1) 客观事实交叉核对（不同源快照有时差，给宽松容差）
+        if t.get("price") and r.get("price"):
+            if abs(r["price"] - t["price"]) / t["price"] > 0.02:
+                flags.append(f"现价分歧 东财{r['price']}/腾讯{t['price']}")
+        if t.get("amount") and r.get("turnover"):
+            if abs(r["turnover"] - t["amount"]) / t["amount"] > 0.15:
+                flags.append(f"成交额分歧 东财{r['turnover']/1e8:.1f}/腾讯{t['amount']/1e8:.1f}亿")
+        if t.get("pct") is not None and r.get("zf") is not None:
+            if abs(r["zf"] - t["pct"]) > 1.0:
+                flags.append(f"涨幅分歧 东财{r['zf']}/腾讯{t['pct']}")
+        # 2) 主力净额物理护栏：净额是买卖差，绝不可能超过当日成交额
+        z, turn = r.get("zhuli"), r.get("turnover") or 0
+        if z is not None and turn and abs(z) > turn:
+            flags.append(f"净额>成交额 判废({z/1e8:.1f}>{turn/1e8:.1f}亿)")
+            r["zhuli"] = None          # 物理不可能 → 置空，不计入聚合
+        elif z is not None and turn and abs(z) > turn * 0.6:
+            flags.append(f"净额占比偏高{abs(z)/turn*100:.0f}%")  # 软标记，保留
+        r["verified"] = not flags
+        r["flags"] = flags
+    return rows
 
 
 def compute_capital_signals(parsed):
@@ -281,17 +272,27 @@ def compute_capital_signals(parsed):
     down = sum(1 for s in parsed if (s.get("zf") or 0) < 0)
     flat = n - up - down
     avg_zf = sum((s.get("zf") or 0) for s in parsed) / n
-    sum_zhuli = sum((s.get("zhuli") or 0) for s in parsed)
+
+    # 主力净额只统计「通过交叉验证 且 通过物理护栏」的行；存疑/判废行不喂假值
+    valid_z = [s for s in parsed if s.get("zhuli") is not None and s.get("verified")]
+    sum_zhuli = sum((s.get("zhuli") or 0) for s in valid_z)
+    z_turnover = sum((s.get("turnover") or 0) for s in valid_z) or 1
+    verified_cnt = sum(1 for s in parsed if s.get("verified"))
 
     # 情绪温度 0-100：红绿比 + 平均涨幅 + 主力净额占比 三因子加权
+    # 主力净额占比按“有效净额行”的成交额归一，避免被判废行稀释
     rg_score = max(-25, min(25, (up / max(down, 1) - 1) * 15))
     avg_score = max(-25, min(25, avg_zf * 5))
-    zhuli_pct = sum_zhuli / sum_turnover * 100
+    zhuli_pct = sum_zhuli / z_turnover * 100
     zhuli_score = max(-25, min(25, zhuli_pct * 5))
     temp = round(50 + rg_score + avg_score + zhuli_score)
     temp = max(0, min(100, temp))
 
     signals = []
+    # 数据质量：交叉验证未全过 → 显式提示存疑，不让脏数据冒充信号
+    if verified_cnt < n:
+        signals.append({"type": "warn", "label": "数据存疑",
+                        "tip": f"{n}只中仅 {verified_cnt} 只通过东财×腾讯交叉验证"})
     # 泛绿出逃：下跌数显著多于上涨数
     if down > 0 and down >= up * 2 and n >= 15:
         signals.append({"type": "warn", "label": "泛绿出逃",
@@ -300,8 +301,8 @@ def compute_capital_signals(parsed):
     if -1 <= avg_zf <= 3 and n >= 15 and abs(up - down) <= n // 3:
         signals.append({"type": "warn", "label": "放量滞涨",
                         "tip": f"成交额前列但平均仅 {avg_zf:.2f}%，{up}红{down}绿无明显方向"})
-    # 主力出货：净流出超成交额 2%
-    if sum_zhuli < 0 and abs(sum_zhuli) > sum_turnover * 0.02:
+    # 主力出货：净流出超(有效净额行)成交额 2%
+    if sum_zhuli < 0 and abs(sum_zhuli) > z_turnover * 0.02:
         signals.append({"type": "warn", "label": "主力出货",
                         "tip": f"合计净流出 {abs(sum_zhuli)/1e8:.2f} 亿"})
     # 普涨进攻：多数上涨且涨幅明显
@@ -324,6 +325,9 @@ def compute_capital_signals(parsed):
         "sum_zhuli": sum_zhuli,
         "sum_turnover": sum_turnover,
         "temp": temp,
+        "verified_count": verified_cnt,
+        "total_count": n,
+        "zhuli_valid_count": len(valid_z),
         "signals": signals,
     }
 
@@ -410,10 +414,6 @@ if __name__ == "__main__":
     jjyd = parse_jjyd(get_jjyd()) or prev.get("jjyd", [])
     top_volume = parse_top_volume(get_top_volume(20)) or prev.get("top_volume", [])
     capital_signals = compute_capital_signals(top_volume) if top_volume else prev.get("capital_signals", {})
-    zt_raw, zt_date = get_zt_pool()
-    zt_pool = parse_zt_pool(zt_raw) or prev.get("zt_pool", [])
-    zt_date = zt_date or prev.get("zt_date", "")
-
     with open(data_path, "w", encoding="utf-8") as f:
         json.dump({
             "updated_at": now_cn_str(),
@@ -422,7 +422,5 @@ if __name__ == "__main__":
             "jjyd": jjyd,
             "top_volume": top_volume,
             "capital_signals": capital_signals,
-            "zt_pool": zt_pool,
-            "zt_date": zt_date,
         }, f, ensure_ascii=False, indent=2)
-    print(f"saved: lhb={len(result)} jjyd={len(jjyd)} top_volume={len(top_volume)} zt={len(zt_pool)}")
+    print(f"saved: lhb={len(result)} jjyd={len(jjyd)} top_volume={len(top_volume)}")
