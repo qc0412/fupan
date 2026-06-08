@@ -37,7 +37,7 @@ watch(() => [props.temp, props.hasData], animate)
 <template>
   <div class="temp-gauge">
     <svg width="116" height="116" viewBox="0 0 116 116">
-      <circle cx="58" cy="58" r="48" fill="none" stroke="#2c313c" stroke-width="9" />
+      <circle cx="58" cy="58" r="48" fill="none" stroke="#e3e7ec" stroke-width="9" />
       <circle
         class="arc-fg"
         cx="58" cy="58" r="48" fill="none" stroke-width="9" stroke-linecap="round"

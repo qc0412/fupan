@@ -38,7 +38,7 @@ export function moneyClass(v) {
 }
 
 export function tempColor(t) {
-  if (t >= 65) return '#ff5252'
-  if (t <= 35) return '#21d07a'
-  return '#ffab2e'
+  if (t >= 65) return '#e04848'
+  if (t <= 35) return '#16a667'
+  return '#c2871a'
 }
