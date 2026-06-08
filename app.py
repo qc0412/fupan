@@ -25,7 +25,7 @@ DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "data.json")
 REVIEWS_DIR = os.path.join(os.path.dirname(__file__), "data", "reviews")
 
 # 复盘报告文件名约定：<YYYY-MM-DD>_<type>.md，type 取以下白名单。
-REVIEW_TYPES = {"fupan": "日复盘", "jieli": "连板接力"}
+REVIEW_TYPES = {"fupan": "日复盘", "jieli": "连板接力", "jingjia": "集合竞价"}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 _cache = {
