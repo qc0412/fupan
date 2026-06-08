@@ -21,4 +21,8 @@ echo "===== $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S') 启动 /jingjia 自动
     --dangerously-skip-permissions \
     --add-dir /home/ubuntu/fupan
 
+# 跑完立刻发布上线，不必等每10分钟的 publish cron（本机 fupan.service 直读 data/reviews，落盘即生效）
+echo "--- 立即发布 ---"
+/usr/bin/python3 /home/ubuntu/fupan/scripts/publish_reviews.py
+
 echo "===== $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S') 结束 ====="
