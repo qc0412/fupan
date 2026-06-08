@@ -32,6 +32,7 @@ _cache = {
     "data": [],
     "trading_days": [],
     "updated_at": "",
+    "lhb_at": 0.0,
     "jjyd": [],
     "jjyd_at": 0.0,
     "top_volume": [],
@@ -78,18 +79,57 @@ def _save_to_disk():
         pass
 
 
-def refresh_lhb():
+def _lhb_ttl():
+    """多日龙虎榜 TTL（秒）：
+    - 交易时段（9:00–15:30）→ 10 分钟
+    - 收盘后至 20:00 仍 → 10 分钟（盘后数据出来不必等 18:30 cron）
+    - 其余（深夜/清晨/周末）→ 60 分钟
+    """
+    now = _now_cn()
+    if now.weekday() >= 5:
+        return 3600
+    t = now.time()
+    if dtime(9, 0) <= t <= dtime(20, 0):
+        return 600
+    return 3600
+
+
+def refresh_lhb(force=False):
+    """抓多日龙虎榜写盘。force=True 跳过 TTL（启动/cron/手动刷新用）。
+    返回 True 表示本次成功拉到新数据并写盘；抓取失败时保留旧数据。"""
+    ttl = _lhb_ttl()
+    if not force and time_mod.time() - _cache["lhb_at"] < ttl and _cache["data"]:
+        return False
     if not _lhb_lock.acquire(blocking=False):
-        return
+        return False
     try:
+        # 双检：等锁期间可能已被别的线程刷新过
+        if not force and time_mod.time() - _cache["lhb_at"] < ttl and _cache["data"]:
+            return False
         data, days = fetch_multi_day_lhb()
         if data:
             _cache["data"] = data
             _cache["trading_days"] = days
+            _cache["lhb_at"] = time_mod.time()
             _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
             _save_to_disk()
+            return True
+        # 抓取失败：保留旧数据，冷却 ttl/2 秒后再试
+        _cache["lhb_at"] = time_mod.time() - ttl + ttl / 2
+        return False
+    except Exception:
+        _cache["lhb_at"] = time_mod.time() - ttl + ttl / 2
+        return False
     finally:
         _lhb_lock.release()
+
+
+def refresh_lhb_if_stale():
+    """请求路径用：TTL 内直接返回；过期则后台线程刷新，不阻塞 /api/data
+    （多日回溯抓取较重，放后台避免拖慢响应，下一次轮询即可拿到新数据）。"""
+    if time_mod.time() - _cache["lhb_at"] < _lhb_ttl() and _cache["data"]:
+        return
+    threading.Thread(target=refresh_lhb, daemon=True).start()
 
 
 def _is_trading_hours():
@@ -148,12 +188,13 @@ def refresh_capital_if_stale():
 
 
 if not _load_from_disk():
-    refresh_lhb()
+    refresh_lhb(force=True)
 threading.Thread(target=refresh_jjyd_if_stale, daemon=True).start()
 threading.Thread(target=refresh_capital_if_stale, daemon=True).start()
 
 scheduler = BackgroundScheduler(timezone=CN_TZ)
-scheduler.add_job(refresh_lhb, "cron", day_of_week="mon-fri", hour=18, minute=30)
+scheduler.add_job(lambda: refresh_lhb(force=True), "cron",
+                  day_of_week="mon-fri", hour=18, minute=30)
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
 
@@ -161,6 +202,7 @@ atexit.register(lambda: scheduler.shutdown())
 @app.route("/api/data")
 def api_data():
     """前端 SPA 数据接口：触发 TTL 刷新后返回全部四块数据。"""
+    refresh_lhb_if_stale()
     refresh_jjyd_if_stale()
     refresh_capital_if_stale()
     return {
@@ -214,6 +256,20 @@ def api_review(date, rtype):
     with open(path, encoding="utf-8") as f:
         markdown = f.read()
     return {"date": date, "type": rtype, "label": REVIEW_TYPES[rtype], "markdown": markdown}
+
+
+@app.route("/api/refresh/lhb", methods=["GET", "POST"])
+def api_refresh_lhb():
+    """手动/内部强制刷新多日龙虎榜（阻塞直到完成），并写回 data/data.json。
+    返回更新结果，便于确认数据新鲜度。"""
+    updated = refresh_lhb(force=True)
+    days = _cache["trading_days"]
+    return {
+        "updated": updated,                 # 是否成功拉到新数据（失败/被占用为 False，旧数据保留）
+        "updated_at": _cache["updated_at"],
+        "latest_trading_day": days[0] if days else None,
+        "count": len(_cache["data"]),
+    }
 
 
 @app.route("/healthz")
