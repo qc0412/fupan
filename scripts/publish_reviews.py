@@ -70,6 +70,28 @@ def publish_fupan():
     return changed
 
 
+# ---------- jingjia：直接搬运 skill 写好的完整 markdown（同 fupan）----------
+
+def publish_jingjia():
+    changed = []
+    pattern = os.path.join(CLAUDECODE, "jingjia_20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].md")
+    for src in sorted(glob.glob(pattern)):
+        if not _recent(src):
+            continue
+        m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(src))
+        if not m:
+            continue
+        date = m.group(1)
+        with open(src, encoding="utf-8") as f:
+            content = f.read()
+        if not content.strip():
+            continue  # 跳过空占位文件
+        dst = os.path.join(REVIEWS, f"{date}_jingjia.md")
+        if write_if_changed(dst, content):
+            changed.append(f"{date}_jingjia.md")
+    return changed
+
+
 # ---------- jieli：从盯盘池 JSON 渲染 markdown ----------
 
 def _fmt_three_std(s):
@@ -207,7 +229,7 @@ def commit_and_push(changed):
 
 def main():
     os.makedirs(REVIEWS, exist_ok=True)
-    changed = publish_fupan() + publish_jieli()
+    changed = publish_fupan() + publish_jingjia() + publish_jieli()
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not changed:
         print(f"[{stamp}] no change")
