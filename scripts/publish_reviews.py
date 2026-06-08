@@ -216,26 +216,31 @@ def render_jieli(pool):
         if height < 2:
             continue
         lb, sb, tot = _follower_counts(s.get("跟风清单"))
+        sector = (s.get("主板块") or "").strip() or "未分类"
+        theme = (s.get("主线") or "").strip()
         items.append({
             "s": s,
             "height": height,
             "lb": lb, "sb": sb, "tot": tot,
             "amt": _amount(s.get("成交")),
-            "sector": (s.get("主板块") or "").strip() or "未分类",
+            "sector": sector,
+            "theme": theme,
+            # 板块内地位/归堆按"主线"（短线叙事归并）优先，无主线回退权威板块
+            "group": theme or sector,
         })
 
-    # 板块内每只最高连板高度
+    # 板块内每只最高连板高度（按主线归堆）
     sector_max = {}
     for it in items:
-        sector_max[it["sector"]] = max(sector_max.get(it["sector"], 0), it["height"])
+        sector_max[it["group"]] = max(sector_max.get(it["group"], 0), it["height"])
     sector_max_cnt = {}
     for it in items:
-        if it["height"] == sector_max[it["sector"]]:
-            sector_max_cnt[it["sector"]] = sector_max_cnt.get(it["sector"], 0) + 1
+        if it["height"] == sector_max[it["group"]]:
+            sector_max_cnt[it["group"]] = sector_max_cnt.get(it["group"], 0) + 1
 
     def _status(it):
-        if it["height"] == sector_max[it["sector"]]:
-            return "并列最高" if sector_max_cnt[it["sector"]] > 1 else "最高板"
+        if it["height"] == sector_max[it["group"]]:
+            return "并列最高" if sector_max_cnt[it["group"]] > 1 else "最高板"
         if it["tot"] == 0:
             return "独苗"
         return "跟风"
@@ -256,26 +261,30 @@ def render_jieli(pool):
                 bits = [b for b in (s.get("成交"), s.get("炸板次数") is not None and f"炸板{s['炸板次数']}次") if b]
                 evid = " ｜ ".join(str(b) for b in bits)
             flw = f"{_fc(it['lb'])}/{_fc(it['sb'])}/{_fc(it['tot'])}"
+            # 权威板块 + 主线归并（主线与权威板块不同才追加，避免冗余）
+            sector_disp = it["sector"]
+            if it["theme"] and it["theme"] != it["sector"]:
+                sector_disp = f"{it['sector']}›{it['theme']}"
             lines.append(
                 f"| {_cell(s.get('name',''))}({_cell(s.get('code',''))}) "
-                f"| {_cell(s.get('连板数',''))} | {_cell(it['sector'])} "
+                f"| {_cell(s.get('连板数',''))} | {_cell(sector_disp)} "
                 f"| {_cell(_status(it))} | {flw} "
                 f"| {_cell(s.get('龙头判定',''))} | {_cell(evid)} |"
             )
         lines.append("")
 
-    # --- 板块龙头小结：每个出现过的板块一行 ---
+    # --- 板块龙头小结：每条主线/板块一行（按主线归堆） ---
     sectors = []
     for it in items:
-        if it["sector"] not in sectors:
-            sectors.append(it["sector"])
+        if it["group"] not in sectors:
+            sectors.append(it["group"])
     if sectors:
         lines.append("## 板块龙头小结")
         lines.append("")
         lines.append("| 板块 | 龙头 | 高度 | 跟风(连板/首板/合计) | 板块结论 |")
         lines.append("|---|---|---|---|---|")
         for sec in sectors:
-            members = [it for it in items if it["sector"] == sec]
+            members = [it for it in items if it["group"] == sec]
             leader = sorted(
                 members,
                 key=lambda it: (

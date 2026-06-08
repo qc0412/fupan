@@ -220,13 +220,104 @@ def fetch_plate_detail(plate_id):
     }
 
 
+# =========================================================================
+# 短线叙事归并层（在权威板块之上，做一层保守的主线归堆）
+# =========================================================================
+# 痛点：权威板块按"今日为什么涨"归类已经对，但短线叙事常把若干相邻板块
+#       归到同一条主线（机器人/具身智能/AI智能制造 → "物理AI"；
+#       航天/卫星/北斗/商业航天 → "商业航天"）。这一层只在权威板块 + reason
+#       双重命中时才归并，且多主线命中即判歧义、保守不归并，避免过度误伤。
+NARRATIVE_THEMES = [
+    {
+        "name": "物理AI",
+        # 板块名命中（强信号）
+        "plate_kw": ["机器人", "具身智能", "人形机器人", "智能制造",
+                     "工业智能", "机械智能", "机器人数据"],
+        # reason 命中（弱信号，做佐证 / reason 驱动）
+        "reason_kw": ["具身智能", "人形机器人", "机器人", "AI+智能制造",
+                      "AI智能制造", "智能制造", "工业智能", "机器人数据",
+                      "机械智能", "动捕", "机器人任务"],
+    },
+    {
+        "name": "商业航天",
+        "plate_kw": ["航天", "卫星", "北斗", "商业航天", "航天装备"],
+        "reason_kw": ["商业航天", "航天", "卫星", "北斗", "运载火箭",
+                      "火箭", "低轨", "星座"],
+    },
+]
+
+
+def narrative_theme(plates, reason):
+    """
+    在权威板块之上做一层保守的短线主线归并。
+
+    输入:  plates = [{id,name}, ...]（权威板块）, reason = 涨停原因文本
+    输出:  (theme, basis)
+           theme: "物理AI" / "商业航天" / None（保守不归并）
+           basis: {theme, rule, matched:[{theme,plate:[kw],reason:[kw]}], candidates}
+                  rule: physical_ai_pair（大模型/机器人板块 + AI制造/具身关键词 → 物理AI）
+                        plate_hit（板块名唯一命中 → 归并，最高置信）
+                        ambiguous_plate（多主线板块名命中 → 歧义，不归并）
+                        reason_only_skip（仅 reason 命中、板块名未命中 → 保守不归并）
+                        none（未命中）
+
+    决策（保守优先）：优先处理短线明确组合；一般情况下必须"板块名"命中才归并，
+    reason 关键词只作佐证 / 依据，不单独触发归并。多条主线的板块名同时命中即判歧义，
+    一律不归并。
+    """
+    plate_names = [p.get("name", "") for p in (plates or [])]
+    reason = reason or ""
+    hits = {}  # theme -> {"plate": [kw...], "reason": [kw...]}
+    for rule in NARRATIVE_THEMES:
+        pk = [kw for kw in rule["plate_kw"] if any(kw in pn for pn in plate_names)]
+        rk = [kw for kw in rule["reason_kw"] if kw in reason]
+        if pk or rk:
+            hits[rule["name"]] = {"plate": pk, "reason": rk}
+
+    candidates = list(hits.keys())
+
+    def _basis(theme, rule, themes):
+        return {
+            "theme": theme,
+            "rule": rule,
+            "matched": [{"theme": t, **hits[t]} for t in themes],
+            "candidates": candidates,
+        }
+
+    if not hits:
+        return None, {"theme": None, "rule": "none", "matched": [], "candidates": []}
+
+    # 短线特例：权威板块给“人工智能大模型”，但 reason 明确落在 AI+制造/工业/具身/机器人，
+    # 盘面通常按“物理AI”合并看。若同时提到商业航天，作为 secondary reason 保留，不抢主线。
+    has_ai_model_plate = any("人工智能" in pn or "大模型" in pn for pn in plate_names)
+    physical_reason = [kw for kw in ("AI+智能制造", "AI智能制造", "智能制造", "工业智能", "具身智能", "人形机器人", "机器人") if kw in reason]
+    if has_ai_model_plate and physical_reason:
+        hits.setdefault("物理AI", {"plate": [], "reason": []})
+        hits["物理AI"]["plate"] = list(dict.fromkeys(hits["物理AI"]["plate"] + ["人工智能大模型"]))
+        hits["物理AI"]["reason"] = list(dict.fromkeys(hits["物理AI"]["reason"] + physical_reason))
+        candidates = list(hits.keys())
+        return "物理AI", _basis("物理AI", "physical_ai_pair", ["物理AI"])
+
+    plate_themes = [t for t, h in hits.items() if h["plate"]]
+    if len(plate_themes) == 1:                        # 板块名唯一命中 → 归并
+        t = plate_themes[0]
+        return t, _basis(t, "plate_hit", [t])
+    if len(plate_themes) >= 2:                        # 多主线板块名命中 → 歧义
+        return None, _basis(None, "ambiguous_plate", plate_themes)
+    # 仅 reason 命中、板块名未命中 → 保守不归并（只留候选供人工查看）
+    return None, _basis(None, "reason_only_skip", candidates)
+
+
 def classify_stocks(codes, date=None, with_chain=False):
     """
-    主 API：给一组股票代码，返回每只的权威板块归类。
+    主 API：给一组股票代码，返回每只的权威板块归类 + 短线主线归并。
 
     输入:  codes = ["300835", "688603", ...]  date=YYYYMMDD（可空，默认当天）
-    输出:  {code: {name, plates:[{id,name}], reason, board_count_desc, source}}
+    输出:  {code: {name, plates:[{id,name}], reason, board_count_desc, source,
+                   narrative_theme, theme_basis}}
            source: "surge_stock"（权威）/ "plate_set"（反查命中）/ None（未找到）
+           narrative_theme: 归并后的短线主线名（"物理AI"/"商业航天"/None）
+           theme_basis:     归类依据（命中的 plate/reason 关键词 + 判定规则）
 
     工作流程:
     1) 先从 surge_stock/stocks 拉当日涨停股，建立 code→plates 映射（权威）
@@ -288,6 +379,12 @@ def classify_stocks(codes, date=None, with_chain=False):
                 "board_count_desc": "",
                 "source": None,
             }
+
+    # 叙事归并层：为每只票补 narrative_theme + theme_basis（原始权威板块保留在 plates）
+    for r in result.values():
+        theme, basis = narrative_theme(r.get("plates"), r.get("reason"))
+        r["narrative_theme"] = theme
+        r["theme_basis"] = basis
     return result
 
 
@@ -450,6 +547,14 @@ def main():
                     name = r.get("name") or ""
                     board = r.get("board_count_desc") or ""
                     print(f"  {c} {name:<8} [{plates}] {board} <{src}>")
+                    theme = r.get("narrative_theme")
+                    if theme:
+                        basis = r.get("theme_basis") or {}
+                        kws = []
+                        for m in basis.get("matched", []):
+                            kws += m.get("plate", []) + m.get("reason", [])
+                        kw_str = "、".join(dict.fromkeys(kws))
+                        print(f"      ⇒ 主线: {theme}（{basis.get('rule')}：{kw_str}）")
                     if r.get("reason"):
                         reason = r["reason"][:100] + ("..." if len(r["reason"]) > 100 else "")
                         print(f"      ↳ {reason}")
