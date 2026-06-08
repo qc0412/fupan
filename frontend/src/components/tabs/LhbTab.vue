@@ -39,7 +39,7 @@ function zfText(zf) {
 </script>
 
 <template>
-  <div class="card">
+  <div class="card" v-reveal>
     <div class="filters">
       <button
         v-for="d in dayOptions" :key="d"
@@ -51,7 +51,7 @@ function zfText(zf) {
     <div v-if="!filtered.length" class="empty">暂无数据</div>
     <table v-else>
       <thead><tr><th>股票</th><th>连续上榜</th><th>连续涨跌幅</th></tr></thead>
-      <tbody>
+      <tbody v-reveal="{ children: 'tr', stagger: 0.03, y: 8 }">
         <tr v-for="s in filtered" :key="s.code">
           <td><div class="stock-name">{{ s.name }}</div><div class="stock-code">{{ s.code }}</div></td>
           <td><span class="count-badge">连{{ s.appearances.length }}天</span></td>

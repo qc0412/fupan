@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useMarketStore } from '../../stores/market'
 import { fmtYuan, moneyClass } from '../../composables/format'
 import TempGauge from '../TempGauge.vue'
+import RollNumber from '../RollNumber.vue'
 
 const store = useMarketStore()
 const cs = computed(() => store.capitalSignals || {})
@@ -20,20 +21,20 @@ const allVerified = computed(() => totalCount.value > 0 && verifiedCount.value =
 </script>
 
 <template>
-  <div class="card">
+  <div class="card" v-reveal>
     <div class="capital-hero">
       <TempGauge :temp="cs.temp" :has-data="hasData" />
       <div class="capital-stats">
         <div class="stat">
           <span class="label">红绿比</span>
           <span class="val">
-            <span class="money-up">{{ up }}红</span> / <span class="money-down">{{ down }}绿</span><span v-if="flat"> · {{ flat }}平</span>
-            <span style="color:#999;font-weight:400;font-size:0.78rem"> ({{ ratio }})</span>
+            <span class="money-up"><RollNumber :value="up" :duration="0.7" />红</span> / <span class="money-down"><RollNumber :value="down" :duration="0.7" />绿</span><span v-if="flat"> · {{ flat }}平</span>
+            <span style="color:var(--txt-3);font-weight:400;font-size:0.78rem"> ({{ ratio }})</span>
           </span>
         </div>
         <div class="stat">
           <span class="label">平均涨幅</span>
-          <span class="val"><span :class="moneyClass(avg)">{{ avg > 0 ? '+' : '' }}{{ avg }}%</span></span>
+          <span class="val"><span :class="moneyClass(avg)"><RollNumber :value="Number(avg)" :decimals="2" :prefix="avg > 0 ? '+' : ''" suffix="%" /></span></span>
         </div>
         <div class="stat">
           <span class="label">合计成交</span>
@@ -62,7 +63,7 @@ const allVerified = computed(() => totalCount.value > 0 && verifiedCount.value =
         <th>股票</th><th>涨幅</th><th>成交额</th><th>主力净额</th>
         <th class="col-hsl">换手</th><th class="col-amp">振幅</th><th>行业</th>
       </tr></thead>
-      <tbody>
+      <tbody v-reveal="{ children: 'tr', stagger: 0.03, y: 8 }">
         <tr v-for="(s, i) in store.topVolume" :key="s.code" :class="{ unverified: s.verified === false }">
           <td>
             <span class="rank">{{ i + 1 }}</span><span class="stock-name">{{ s.name }}</span>

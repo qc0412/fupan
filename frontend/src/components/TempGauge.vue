@@ -1,5 +1,6 @@
 <script setup>
-import { computed } from 'vue'
+import { ref, watch, onMounted } from 'vue'
+import gsap from 'gsap'
 import { tempColor } from '../composables/format'
 
 const props = defineProps({
@@ -8,22 +9,43 @@ const props = defineProps({
 })
 
 const ARC = 301.6 // 2 * PI * 48
-const t = computed(() => (props.hasData ? props.temp : 50))
-const color = computed(() => (props.hasData ? tempColor(t.value) : '#ddd'))
-const offset = computed(() => (props.hasData ? ARC * (1 - t.value / 100) : ARC))
+const target = () => (props.hasData ? Math.max(0, Math.min(100, props.temp)) : 0)
+
+const offset = ref(ARC)          // 圆环 dashoffset
+const shown = ref(0)             // 中央数字
+const color = ref('#3b475a')
+
+const tweenObj = { v: 0 }
+function animate() {
+  const to = target()
+  color.value = props.hasData ? tempColor(to) : '#3b475a'
+  gsap.to(tweenObj, {
+    v: to,
+    duration: 1.1,
+    ease: 'power2.out',
+    onUpdate: () => {
+      shown.value = tweenObj.v
+      offset.value = ARC * (1 - tweenObj.v / 100)
+    },
+  })
+}
+
+onMounted(() => { tweenObj.v = 0; animate() })
+watch(() => [props.temp, props.hasData], animate)
 </script>
 
 <template>
   <div class="temp-gauge">
-    <svg width="110" height="110" viewBox="0 0 110 110">
-      <circle cx="55" cy="55" r="48" fill="none" stroke="#f0f0f0" stroke-width="9" />
+    <svg width="116" height="116" viewBox="0 0 116 116">
+      <circle cx="58" cy="58" r="48" fill="none" stroke="#1e2736" stroke-width="9" />
       <circle
-        cx="55" cy="55" r="48" fill="none" stroke-width="9" stroke-linecap="round"
+        class="arc-fg"
+        cx="58" cy="58" r="48" fill="none" stroke-width="9" stroke-linecap="round"
         :stroke="color" stroke-dasharray="301.6" :stroke-dashoffset="offset"
       />
     </svg>
     <div class="temp-num">
-      <div class="v" :style="{ color: hasData ? tempColor(t) : '#bbb' }">{{ hasData ? t : '--' }}</div>
+      <div class="v" :style="{ color: hasData ? color : '#5f6b7d' }">{{ hasData ? Math.round(shown) : '--' }}</div>
       <div class="l">情绪温度</div>
     </div>
   </div>

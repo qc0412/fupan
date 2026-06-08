@@ -1,5 +1,6 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import gsap from 'gsap'
 import { useMarketStore } from './stores/market'
 import LhbTab from './components/tabs/LhbTab.vue'
 import JjydTab from './components/tabs/JjydTab.vue'
@@ -15,19 +16,49 @@ const tabs = [
 const active = ref('capital')
 const store = useMarketStore()
 
-onMounted(() => store.startPolling())
+const tabsEl = ref(null)
+const indicatorEl = ref(null)
+
+function moveIndicator(animate = true) {
+  const wrap = tabsEl.value
+  const ind = indicatorEl.value
+  if (!wrap || !ind) return
+  const el = wrap.querySelector('.tab.active')
+  if (!el) return
+  const x = el.offsetLeft
+  const w = el.offsetWidth
+  if (animate) {
+    gsap.to(ind, { x, width: w, duration: 0.42, ease: 'power3.out' })
+  } else {
+    gsap.set(ind, { x, width: w })
+  }
+}
+
+function pick(key) {
+  if (key === active.value) return
+  active.value = key
+}
+
+watch(active, () => nextTick(() => moveIndicator(true)))
+
+onMounted(() => {
+  store.startPolling()
+  nextTick(() => moveIndicator(false))
+  window.addEventListener('resize', () => moveIndicator(false))
+})
 onUnmounted(() => store.stopPolling())
 </script>
 
 <template>
   <div class="main">
-    <div class="tabs">
+    <div class="tabs" ref="tabsEl">
+      <div class="tab-indicator" ref="indicatorEl"></div>
       <div
         v-for="t in tabs"
         :key="t.key"
         class="tab"
         :class="{ active: active === t.key }"
-        @click="active = t.key"
+        @click="pick(t.key)"
       >{{ t.label }}</div>
     </div>
 
@@ -37,6 +68,8 @@ onUnmounted(() => store.stopPolling())
       <template v-else>更新时间：{{ store.updatedAt }} (北京时间)</template>
     </div>
 
-    <component v-for="t in tabs" v-show="active === t.key" :key="t.key" :is="t.comp" />
+    <template v-for="t in tabs" :key="t.key">
+      <component v-if="active === t.key" :is="t.comp" />
+    </template>
   </div>
 </template>

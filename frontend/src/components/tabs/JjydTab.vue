@@ -14,17 +14,31 @@ const sortOptions = [
 ]
 const sortLabels = { zhuli: '竞价净额', jje: '竞额', jjzf: '竞价涨幅', zf: '涨幅', jjhs: '竞价换手' }
 
+const HOT = 45 // 净额占比 ≥45% = 资金坚决，🔥 重点标注
+
+// 净额占比 = 竞价净额 / 竞额（同为万元单位）
+function ratioOf(s) {
+  const z = Number(s.zhuli), j = Number(s.jje)
+  return j > 0 && !isNaN(z) ? (z / j) * 100 : null
+}
+
 const list = computed(() =>
-  store.jjyd.slice().sort((a, b) => sortKey(b, sort.value) - sortKey(a, sort.value))
+  store.jjyd
+    .slice()
+    .sort((a, b) => sortKey(b, sort.value) - sortKey(a, sort.value))
+    .map((s) => ({ ...s, ratio: ratioOf(s) }))
 )
+const hotCount = computed(() => list.value.filter((s) => s.ratio != null && s.ratio >= HOT).length)
 const summary = computed(() =>
-  list.value.length ? `共 ${list.value.length} 只，按${sortLabels[sort.value]}降序` : ''
+  list.value.length
+    ? `共 ${list.value.length} 只，按${sortLabels[sort.value]}降序` + (hotCount.value ? ` · 🔥 净额占比≥${HOT}% ${hotCount.value} 只` : '')
+    : ''
 )
 const conceptHtml = (c) => (c || '').replace(/\|/g, '<br>')
 </script>
 
 <template>
-  <div class="card">
+  <div class="card" v-reveal>
     <div class="filters">
       <span class="filter-label">排序</span>
       <button
@@ -37,11 +51,11 @@ const conceptHtml = (c) => (c || '').replace(/\|/g, '<br>')
     <div v-if="!list.length" class="empty">暂无数据（交易日 09:25 后更新）</div>
     <table v-else class="jjyd-table">
       <thead><tr>
-        <th>股票</th><th>竞价/现价</th><th>竞价净额</th><th>竞额</th>
+        <th>股票</th><th>竞价/现价</th><th>竞价净额</th><th>竞额</th><th>净额占比</th>
         <th>竞价换手</th><th class="col-ltsz">流通</th><th>概念</th>
       </tr></thead>
-      <tbody>
-        <tr v-for="s in list" :key="s.code">
+      <tbody v-reveal="{ children: 'tr', stagger: 0.025, y: 8 }">
+        <tr v-for="s in list" :key="s.code" :class="{ hot: s.ratio != null && s.ratio >= HOT }">
           <td><div class="stock-name">{{ s.name }}</div><div class="stock-code">{{ s.code }}</div></td>
           <td>
             <div v-if="!isNaN(Number(s.jjzf))" class="pct-jj">竞{{ Number(s.jjzf) > 0 ? '+' : '' }}{{ s.jjzf }}%</div>
@@ -49,6 +63,10 @@ const conceptHtml = (c) => (c || '').replace(/\|/g, '<br>')
           </td>
           <td><span :class="moneyClass(s.zhuli)" style="font-weight:600">{{ s.zhuli ? fmtWanUnit(s.zhuli) : '--' }}</span></td>
           <td>{{ fmtWanUnit(s.jje) }}</td>
+          <td class="ratio-cell">
+            <span v-if="s.ratio != null" :class="{ 'ratio-hot': s.ratio >= HOT }">{{ s.ratio.toFixed(1) }}%</span>
+            <span v-else>--</span>
+          </td>
           <td>{{ Number(s.jjhs) }}%</td>
           <td class="col-ltsz">{{ Number(s.ltsz).toFixed(0) }}亿</td>
           <td><div class="concept" v-html="conceptHtml(s.concept)"></div></td>

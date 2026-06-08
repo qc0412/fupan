@@ -64,7 +64,7 @@ onMounted(loadList)
 </script>
 
 <template>
-  <div class="card review-card">
+  <div class="card review-card" v-reveal>
     <div v-if="!reviews.length && !error" class="empty">暂无复盘报告</div>
     <div v-else-if="error && !reviews.length" class="empty">复盘列表加载失败：{{ error }}</div>
 
