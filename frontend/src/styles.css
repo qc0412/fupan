@@ -79,11 +79,11 @@ body {
   background: var(--panel-2); color: var(--txt-2); cursor: pointer; font-size: 0.82rem;
   transition: all .18s;
 }
-.filter-btn.active { border-color: var(--brand-a); color: #fff; background: rgba(107,138,253,.14); box-shadow: 0 0 0 1px rgba(107,138,253,.25) inset; font-weight: 600; }
+.filter-btn.active { border-color: var(--brand-a); color: var(--accent); background: rgba(85,112,240,.10); box-shadow: 0 0 0 1px rgba(85,112,240,.22) inset; font-weight: 600; }
 .filter-btn:hover:not(.active) { color: var(--txt); background: var(--elevated); }
 .filter-sep { width: 100%; height: 0; }
 .filter-label { font-size: 0.78rem; color: var(--txt-3); margin-right: 4px; }
-.sort-btn.active { border-color: var(--brand-b); background: rgba(107,138,253,.14); box-shadow: 0 0 0 1px rgba(107,138,253,.25) inset; }
+.sort-btn.active { border-color: var(--brand-b); color: var(--accent-2); background: rgba(85,112,240,.10); box-shadow: 0 0 0 1px rgba(85,112,240,.22) inset; }
 
 .dates { font-size: 0.78rem; color: var(--txt-3); padding: 9px 18px; background: var(--panel-2); border-bottom: 1px solid var(--line-soft); }
 
