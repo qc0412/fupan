@@ -8,11 +8,10 @@ const sort = ref('zhuli')
 const sortOptions = [
   { key: 'zhuli', label: '竞价净额' },
   { key: 'jje', label: '竞额' },
-  { key: 'jjzf', label: '竞涨' },
-  { key: 'zf', label: '涨幅' },
+  { key: 'ratio', label: '净额占比' },
   { key: 'jjhs', label: '竞价换手' },
 ]
-const sortLabels = { zhuli: '竞价净额', jje: '竞额', jjzf: '竞价涨幅', zf: '涨幅', jjhs: '竞价换手' }
+const sortLabels = { zhuli: '竞价净额', jje: '竞额', ratio: '净额占比', jjhs: '竞价换手' }
 
 const HOT = 45 // 净额占比 ≥45% = 资金坚决，🔥 重点标注
 
@@ -24,9 +23,8 @@ function ratioOf(s) {
 
 const list = computed(() =>
   store.jjyd
-    .slice()
+    .map((s) => ({ ...s, ratio: ratioOf(s) }))    // 先算占比，才能按它排序
     .sort((a, b) => sortKey(b, sort.value) - sortKey(a, sort.value))
-    .map((s) => ({ ...s, ratio: ratioOf(s) }))
 )
 const hotCount = computed(() => list.value.filter((s) => s.ratio != null && s.ratio >= HOT).length)
 const summary = computed(() =>
