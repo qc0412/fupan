@@ -6,6 +6,7 @@ import LhbTab from './components/tabs/LhbTab.vue'
 import JjydTab from './components/tabs/JjydTab.vue'
 import CapitalTab from './components/tabs/CapitalTab.vue'
 import ReviewTab from './components/tabs/ReviewTab.vue'
+import { pickTraderQuote } from './traderQuotes'
 
 const tabs = [
   { key: 'capital', label: '大资金情绪', comp: CapitalTab },
@@ -15,6 +16,7 @@ const tabs = [
 ]
 const active = ref('capital')
 const store = useMarketStore()
+const quote = ref(pickTraderQuote())
 
 const tabsEl = ref(null)
 const indicatorEl = ref(null)
@@ -60,6 +62,12 @@ onUnmounted(() => store.stopPolling())
         :class="{ active: active === t.key }"
         @click="pick(t.key)"
       >{{ t.label }}</div>
+    </div>
+
+    <div class="quote-card">
+      <div class="quote-kicker">股市交易大佬语录</div>
+      <div class="quote-text">“{{ quote.text }}”</div>
+      <div class="quote-source">— {{ quote.author }}<template v-if="quote.date"> · {{ quote.date }}</template></div>
     </div>
 
     <div class="meta">

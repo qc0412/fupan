@@ -58,6 +58,46 @@ body {
 .tab.active { color: #fff; }
 .tab:hover:not(.active) { color: var(--txt); }
 
+/* ---- quote card ---- */
+.quote-card {
+  position: relative;
+  margin: -4px 0 12px;
+  padding: 16px 18px 14px;
+  border: 1px solid rgba(194, 135, 26, .25);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(194,135,26,.13), rgba(85,112,240,.08)),
+    var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.quote-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--hot), var(--brand-a));
+}
+.quote-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--hot);
+  margin-bottom: 7px;
+}
+.quote-text {
+  color: #242936;
+  font-size: 0.96rem;
+  line-height: 1.72;
+  font-weight: 600;
+}
+.quote-source {
+  margin-top: 8px;
+  text-align: right;
+  color: var(--txt-3);
+  font-size: 0.78rem;
+}
+
 /* ---- meta ---- */
 .meta { text-align: right; font-size: 0.72rem; color: var(--txt-3); padding: 0 6px 10px; }
 .meta .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
