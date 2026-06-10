@@ -333,7 +333,10 @@ def publish_jieli():
         except (json.JSONDecodeError, OSError):
             continue
         date = pool.get("date")
-        if not date:
+        # 严格校验 YYYY-MM-DD：app.py 只认这个格式，曾因 "20260609" 产出
+        # 20260609_jieli.md（无连字符），发布"成功"但网站永远不显示。
+        if not date or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(date)):
+            print(f"[publish_jieli] 日期格式非法（{date!r}），跳过 {os.path.basename(src)}")
             continue
         md = render_jieli(pool)
         dst = os.path.join(REVIEWS, f"{date}_jieli.md")
@@ -362,7 +365,10 @@ def commit_and_push(changed):
         return "nothing staged"
     branch = current_branch()
     msg = "复盘模块：自动发布 " + ", ".join(changed)
-    git("commit", "-m", msg)
+    rc = git("commit", "-m", msg)
+    if rc.returncode != 0:
+        # commit 失败（如 index.lock 残留）不能继续 push，否则推的是旧 HEAD
+        return f"commit failed: {(rc.stderr or rc.stdout).strip()[:200]}，跳过 push"
     if branch != TARGET_BRANCH:
         return f"committed on {branch} (≠{TARGET_BRANCH})，跳过 push"
     try:

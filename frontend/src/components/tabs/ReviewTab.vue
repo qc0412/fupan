@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 // 复盘报告独立于 /api/data 轮询：只在打开 Tab 时按需拉取。
 const reviews = ref([])      // [{date, types:[{type,label}]}]
@@ -11,7 +12,10 @@ const loading = ref(false)
 const error = ref('')
 
 const current = computed(() => reviews.value.find(r => r.date === activeDate.value))
-const html = computed(() => (markdown.value ? marked.parse(markdown.value) : ''))
+// marked 输出过 DOMPurify 消毒后再 v-html，防报告内容夹带脚本
+const html = computed(() =>
+  markdown.value ? DOMPurify.sanitize(marked.parse(markdown.value)) : ''
+)
 
 async function loadList() {
   try {

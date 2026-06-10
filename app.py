@@ -188,7 +188,9 @@ def refresh_capital_if_stale():
 
 
 if not _load_from_disk():
-    refresh_lhb(force=True)
+    # 兜底抓 30 天龙虎榜较重（30-60 秒），放后台线程避免 import 阶段阻塞启动；
+    # 首次请求若数据未就绪，接口返回空结构即可，下一次轮询自然拿到。
+    threading.Thread(target=refresh_lhb, kwargs={"force": True}, daemon=True).start()
 threading.Thread(target=refresh_jjyd_if_stale, daemon=True).start()
 threading.Thread(target=refresh_capital_if_stale, daemon=True).start()
 

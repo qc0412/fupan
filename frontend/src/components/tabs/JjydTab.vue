@@ -32,7 +32,11 @@ const summary = computed(() =>
     ? `共 ${list.value.length} 只，按${sortLabels[sort.value]}降序` + (hotCount.value ? ` · 🔥 净额占比≥${HOT}% ${hotCount.value} 只` : '')
     : ''
 )
-const conceptHtml = (c) => (c || '').replace(/\|/g, '<br>')
+// concept 来自第三方接口，先转义 HTML 特殊字符再做 | → <br>，防 XSS 注入
+const escapeHtml = (s) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+   .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+const conceptHtml = (c) => escapeHtml(String(c || '')).replace(/\|/g, '<br>')
 </script>
 
 <template>

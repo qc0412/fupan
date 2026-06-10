@@ -3,4 +3,9 @@
 # 安装：crontab /home/ubuntu/fupan/scripts/fupan.crontab
 # 查看日志：tail -f /home/ubuntu/fupan/.publish_reviews.log
 PATH=/usr/local/bin:/usr/bin:/bin
-*/10 * * * * /usr/bin/python3 /home/ubuntu/fupan/scripts/publish_reviews.py >> /home/ubuntu/fupan/.publish_reviews.log 2>&1
+*/10 * * * * /usr/bin/flock -n /tmp/publish_reviews.lock /usr/bin/python3 /home/ubuntu/fupan/scripts/publish_reviews.py >> /home/ubuntu/fupan/.publish_reviews.log 2>&1
+
+# /jingjia 集合竞价自动分析：每交易日(周一~周五)北京时间 9:26 本机无人值守跑 /jingjia，
+# 产物写 ~/claudeCode/jingjia_<date>.md，由上面的 publish_reviews 自动发布上线。节假日由脚本内数据判活自动跳过。
+# （脚本内已用 flock -n /tmp/jingjia.lock 防重入）
+26 9 * * 1-5 /home/ubuntu/fupan/scripts/run_jingjia.sh >> /home/ubuntu/fupan/.jingjia_auto.log 2>&1

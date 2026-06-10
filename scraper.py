@@ -1,4 +1,5 @@
 import requests
+import sys
 import time
 import os
 import json
@@ -75,34 +76,43 @@ LHB_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.c
 def get_lhb(date_str):
     """东财龙虎榜每日明细。date_str 形如 2026-06-05。
     返回 [{"info": {"code","name","zf"}}, ...]，与 fetch_multi_day_lhb 聚合逻辑兼容。
-    非交易日 / 无数据返回空列表（上游据此跳过该日）。"""
-    try:
-        r = requests.get(
-            LHB_URL,
-            params={
-                "reportName": "RPT_DAILYBILLBOARD_DETAILSNEW",
-                "columns": "SECURITY_CODE,SECURITY_NAME_ABBR,CHANGE_RATE",
-                "pageNumber": 1, "pageSize": 500,
-                "sortColumns": "SECURITY_CODE", "sortTypes": 1,
-                "filter": f"(TRADE_DATE='{date_str}')",
-            },
-            headers=LHB_HEADERS, timeout=10,
-        )
-        r.raise_for_status()
-        rows = ((r.json() or {}).get("result") or {}).get("data") or []
-        out = []
-        for it in rows:
-            code = str(it.get("SECURITY_CODE") or "")
-            if not code:
-                continue
-            out.append({"info": {
-                "code": code,
-                "name": it.get("SECURITY_NAME_ABBR") or "",
-                "zf": _num(it.get("CHANGE_RATE")),
-            }})
-        return out
-    except Exception:
-        return []
+    HTTP 成功但无数据（非交易日）返回空列表（上游据此跳过该日）；
+    请求异常重试 2 次（间隔 1 秒）仍失败返回 None ——
+    网络失败≠非交易日，上游不得把该日当非交易日永久跳过。"""
+    last_err = None
+    for attempt in range(3):  # 首次 + 重试 2 次
+        if attempt:
+            time.sleep(1)
+        try:
+            r = requests.get(
+                LHB_URL,
+                params={
+                    "reportName": "RPT_DAILYBILLBOARD_DETAILSNEW",
+                    "columns": "SECURITY_CODE,SECURITY_NAME_ABBR,CHANGE_RATE",
+                    "pageNumber": 1, "pageSize": 500,
+                    "sortColumns": "SECURITY_CODE", "sortTypes": 1,
+                    "filter": f"(TRADE_DATE='{date_str}')",
+                },
+                headers=LHB_HEADERS, timeout=10,
+            )
+            r.raise_for_status()
+            rows = ((r.json() or {}).get("result") or {}).get("data") or []
+            out = []
+            for it in rows:
+                code = str(it.get("SECURITY_CODE") or "")
+                if not code:
+                    continue
+                out.append({"info": {
+                    "code": code,
+                    "name": it.get("SECURITY_NAME_ABBR") or "",
+                    "zf": _num(it.get("CHANGE_RATE")),
+                }})
+            return out
+        except Exception as e:
+            last_err = e
+    print(f"[get_lhb] {date_str} 请求失败（重试2次后放弃）: "
+          f"{type(last_err).__name__}: {last_err}", file=sys.stderr)
+    return None
 
 
 # 竞价净额：duanxianxia 集合竞价主力净额（9:25 第一时间结算）。
@@ -125,7 +135,9 @@ def get_jjyd():
         ct = base64.b64decode(r.text.strip())
         pt = unpad(AES.new(JJ_KEY, AES.MODE_CBC, JJ_IV).decrypt(ct), 16)
         return json.loads(pt.decode("utf-8")).get("list") or []
-    except Exception:
+    except Exception as e:
+        # 解密/解析失败 = 密钥可能被轮换，必须可见，不能静默吞掉
+        print(f"[get_jjyd] 失败: {type(e).__name__}: {e}", file=sys.stderr)
         return []
 
 
@@ -367,7 +379,11 @@ def fetch_multi_day_lhb():
             date_str = d.strftime("%Y-%m-%d")
             data = get_lhb(date_str)
             time.sleep(0.5)
-            if data:
+            if data is None:
+                # 网络失败≠非交易日：本轮放弃该日（不标记跳过），下轮重试
+                print(f"[fetch_multi_day_lhb] {date_str} 抓取失败，本轮放弃该日，下轮重试",
+                      file=sys.stderr)
+            elif data:
                 trading_days.append(date_str)
                 day_data[date_str] = data
         d -= timedelta(days=1)
@@ -414,7 +430,9 @@ if __name__ == "__main__":
     jjyd = parse_jjyd(get_jjyd()) or prev.get("jjyd", [])
     top_volume = parse_top_volume(get_top_volume(20)) or prev.get("top_volume", [])
     capital_signals = compute_capital_signals(top_volume) if top_volume else prev.get("capital_signals", {})
-    with open(data_path, "w", encoding="utf-8") as f:
+    # 原子写：先写 tmp 再 os.replace，避免写一半被并发读到残缺 JSON（同 app.py _save_to_disk）
+    tmp_path = data_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump({
             "updated_at": now_cn_str(),
             "trading_days": trading_days,
@@ -423,4 +441,5 @@ if __name__ == "__main__":
             "top_volume": top_volume,
             "capital_signals": capital_signals,
         }, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, data_path)
     print(f"saved: lhb={len(result)} jjyd={len(jjyd)} top_volume={len(top_volume)}")

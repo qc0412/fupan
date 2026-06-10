@@ -23,6 +23,7 @@ export const useMarketStore = defineStore('market', {
     loading: false,
     error: '',
     _timer: null,
+    _onVisible: null,
   }),
   actions: {
     async fetchData() {
@@ -54,13 +55,18 @@ export const useMarketStore = defineStore('market', {
       }
       this.fetchData()
       this._timer = setTimeout(tick, isTradingHours() ? 30000 : 300000)
-      document.addEventListener('visibilitychange', () => {
+      this._onVisible = () => {
         if (document.visibilityState === 'visible') this.fetchData()
-      })
+      }
+      document.addEventListener('visibilitychange', this._onVisible)
     },
     stopPolling() {
       if (this._timer) clearTimeout(this._timer)
       this._timer = null
+      if (this._onVisible) {
+        document.removeEventListener('visibilitychange', this._onVisible)
+        this._onVisible = null
+      }
     },
   },
 })
