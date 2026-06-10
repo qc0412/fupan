@@ -12,3 +12,4 @@ frontend/dist/
 
 # 复盘自动发布日志
 .publish_reviews.log
+.jingjia_auto.log
