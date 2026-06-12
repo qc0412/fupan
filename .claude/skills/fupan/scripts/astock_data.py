@@ -64,6 +64,32 @@ CACHE_DIR.mkdir(exist_ok=True)
 STATS_FILE = CACHE_DIR / "request_stats.json"
 
 
+def zt_threshold(code: str, name: str = "") -> float:
+    """
+    按市场/ST属性返回"视为涨停"的涨跌幅判定阈值(%)
+    - name含ST/*ST → 4.8 (5%板)
+    - 30/68开头(创业板/科创板) → 19.5 (20%板)
+    - 43/83/87/88/92开头(北交所) → 29.5 (30%板)
+    - 其余(沪深主板) → 9.8 (10%板)
+    """
+    if name and "ST" in str(name).upper():
+        return 4.8
+    c = str(code)
+    if c.startswith(("30", "68")):
+        return 19.5
+    if c.startswith(("43", "83", "87", "88", "92")):
+        return 29.5
+    return 9.8
+
+
+def _atomic_write_json(path: Path, obj: Any):
+    """tmp+os.replace 原子写，防并发写出半截文件"""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, default=str)
+    os.replace(tmp, path)
+
+
 class AStockDataFetcher:
     """A股数据获取器 — 内置反爬虫保护与缓存机制"""
 
@@ -121,10 +147,9 @@ class AStockDataFetcher:
                 log.warning(f"⚠️ 加载统计数据失败: {e}")
 
     def _save_stats(self):
-        """保存请求统计数据"""
+        """保存请求统计数据（原子写，防并发覆盖半截文件）"""
         try:
-            with open(STATS_FILE, "w") as f:
-                json.dump(self._stats, f, indent=2)
+            _atomic_write_json(STATS_FILE, self._stats)
         except Exception as e:
             log.warning(f"⚠️ 保存统计数据失败: {e}")
 
@@ -228,6 +253,10 @@ class AStockDataFetcher:
                     log.warning(f"  ⚠️ 返回空数据")
                     self._record_request(success=True)  # 空数据也算成功
                     return result
+            except TypeError as e:
+                # 参数错误（接口签名不匹配），不是网络错：不重试、不计入限流失败计数
+                log.error(f"  ❌ {func_name} 参数错误(不计入失败计数): {e}")
+                return None
             except Exception as e:
                 error_str = str(e).lower()
                 is_rate_limit = any(
@@ -264,33 +293,60 @@ class AStockDataFetcher:
         return f"{today_str}_{hashlib.md5(raw.encode()).hexdigest()[:12]}"
 
     def _get_cache(self, cache_key: str) -> Optional[dict]:
+        """读取缓存。统一返回 {"data": ...} 形式（兼容无"data"键的旧缓存）"""
         if not self.enable_cache:
             return None
         path = CACHE_DIR / f"{cache_key}.json"
-        if path.exists():
-            mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
-            if mtime == date.today():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    log.info(f"💾 缓存命中: {cache_key[:20]}...")
-                    return data
-        return None
+        if not path.exists():
+            return None
+        mtime_dt = datetime.fromtimestamp(path.stat().st_mtime)
+        if mtime_dt.date() != date.today():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception as e:
+            log.warning(f"⚠️ 读缓存失败: {e}")
+            return None
+
+        # 盘中/盘后区分：15:00前抓取的数据，15:00后视为过期需重抓
+        fetched_at = None
+        if isinstance(payload, dict) and payload.get("fetched_at"):
+            try:
+                fetched_at = datetime.fromisoformat(payload["fetched_at"])
+            except (ValueError, TypeError):
+                fetched_at = None
+        if fetched_at is None:
+            fetched_at = mtime_dt  # 旧缓存无fetched_at，用文件mtime兜底
+        close_time = datetime.now().replace(hour=15, minute=0, second=0, microsecond=0)
+        if datetime.now() >= close_time and fetched_at < close_time:
+            log.info(f"💾 缓存为盘中数据(15:00前抓取)，盘后视为过期重抓: {cache_key[:20]}...")
+            return None
+
+        log.info(f"💾 缓存命中: {cache_key[:20]}...")
+        # 兼容旧缓存：无"data"键时把整体包成{"data": ...}
+        if isinstance(payload, dict) and "data" in payload:
+            return payload
+        return {"data": payload}
 
     def _set_cache(self, cache_key: str, data: Any):
         if not self.enable_cache:
             return
         path = CACHE_DIR / f"{cache_key}.json"
-        # 转换DataFrame为dict以便JSON序列化
+        # 统一包成 {"data": ...}，与所有读取端 cached.get("data") 协议对称
         if hasattr(data, "to_dict"):
-            data = {"_type": "dataframe", "data": data.to_dict("records")}
+            payload = {"_type": "dataframe", "data": data.to_dict("records")}
         elif isinstance(data, dict):
-            pass
+            payload = {"_type": "dict", "data": data}
         else:
-            data = {"_type": "raw", "data": str(data)}
+            payload = {"_type": "raw", "data": str(data)}
+        payload["fetched_at"] = datetime.now().isoformat()  # 抓取时间戳，区分盘中/盘后
 
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, default=str)
-        log.info(f"💾 已缓存: {cache_key[:20]}...")
+        try:
+            _atomic_write_json(path, payload)  # 原子写防并发
+            log.info(f"💾 已缓存: {cache_key[:20]}...")
+        except Exception as e:
+            log.warning(f"⚠️ 写缓存失败: {e}")
 
     # ════════════════════════════════════
     #  数据格式化工具
@@ -313,6 +369,21 @@ class AStockDataFetcher:
             return v if v == v else default  # 排除NaN
         except (ValueError, TypeError):
             return default
+
+    @staticmethod
+    def _ths_amount_yi(val) -> float:
+        """解析同花顺资金字段（可能是数值或'12.3亿'/'4500万'字符串），统一返回亿元"""
+        if val is None:
+            return 0.0
+        s = str(val).strip()
+        try:
+            if s.endswith("亿"):
+                return float(s[:-1])
+            if s.endswith("万"):
+                return float(s[:-1]) / 1e4
+            return float(s)  # 数值型：同花顺净额口径为亿元
+        except ValueError:
+            return 0.0
 
     @staticmethod
     def _safe_int(val, default=0) -> int:
@@ -396,11 +467,10 @@ class AStockDataFetcher:
                 result["zab_count"] = len(zab_df)
 
             # 4. 昨日涨停（用于计算昨日反馈）
-            yesterday = (
-                datetime.strptime(date_str, "%Y%m%d") - timedelta(days=1)
-            ).strftime("%Y%m%d")
+            # stock_zt_pool_previous_em(date=D) 语义即"D的上一交易日涨停股(今日表现)"，
+            # 直接传 date_str 本身，不要自然日减一（减一跨周末/节假日必错）
             yest_zt_df = self._safe_call(
-                "stock_zt_pool_previous_em", ak.stock_zt_pool_previous_em, date=yesterday
+                "stock_zt_pool_previous_em", ak.stock_zt_pool_previous_em, date=date_str
             )
             if yest_zt_df is not None and len(yest_zt_df) > 0:
                 result["zt_count_yesterday"] = len(yest_zt_df)
@@ -414,7 +484,11 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 涨跌停统计异常: {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
+        if zt_df is None:
+            # 涨停池抓取失败（非真实0涨停），不落盘缓存
+            return result
         self._set_cache(cache_key, result)
         return result
 
@@ -451,15 +525,14 @@ class AStockDataFetcher:
                 all_heights = set()
 
                 for r in records:
-                    # 优先使用连板数，其次从涨停统计解析（格式如 "2/2"）
+                    # 只认"连板数"字段（连续口径）。
+                    # 禁止用"涨停统计"(如"12天7板"，区间累计口径)兜底冒充连板数
                     height = self._safe_int(r.get("连板数"))
                     if height <= 0:
-                        stats = str(r.get("涨停统计", "")).strip()
-                        if "/" in stats:
-                            try:
-                                height = int(stats.split("/")[0])
-                            except (ValueError, IndexError):
-                                height = 0
+                        log.warning(
+                            f"⚠️ {r.get('名称', '')}({r.get('代码', '')}) 连板数字段缺失，跳过该股"
+                        )
+                        continue
                     if height >= 1:
                         all_heights.add(height)
                         height_key = f"{height}板"
@@ -472,7 +545,7 @@ class AStockDataFetcher:
                             "amount": self._safe_float(r.get("成交额", 0)) / 1e8,
                             "latest_price": self._safe_float(r.get("最新价")),
                             "zt_price": self._safe_float(r.get("最新价", 0)),  # 涨停池无单独涨停价字段，用最新价近似
-                            "seal_capital": self._safe_float(r.get("封板资金", 0)) / 1e4,  # 万元→亿
+                            "seal_capital": self._safe_float(r.get("封板资金", 0)) / 1e8,  # 元→亿
                             "zab_count": self._safe_int(r.get("炸板次数")),
                             "first_seal_time": r.get("首次封板时间", ""),
                             "board_pattern": self._classify_board_pattern_zt(r),
@@ -505,6 +578,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 连板天梯异常: {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -527,22 +601,26 @@ class AStockDataFetcher:
         result = {"concept_top10": [], "industry_top10": [], "main_theme_analysis": {}}
 
         try:
-            # 1. 概念板块实时行情
+            # 1. 概念板块实时行情（全概念列表）
+            # 注意：stock_board_concept_spot_em 是单个概念详情接口（默认"可燃冰"），
+            # 全概念列表必须用 stock_board_concept_name_em
+            # 实测列名: 排名/板块名称/板块代码/最新价/涨跌额/涨跌幅/总市值/换手率/上涨家数/下跌家数/领涨股票/领涨股票-涨跌幅
             concept_df = self._safe_call(
-                "stock_board_concept_spot_em", ak.stock_board_concept_spot_em
+                "stock_board_concept_name_em", ak.stock_board_concept_name_em
             )
             if concept_df is not None and len(concept_df) > 0:
                 records = self._df_to_records(concept_df)
-                # 按涨幅排序取前10
-                records.sort(key=lambda x: self._safe_float(x.get("涨幅")), reverse=True)
+                # 按涨跌幅排序取前10
+                records.sort(key=lambda x: self._safe_float(x.get("涨跌幅")), reverse=True)
                 result["concept_top10"] = [
                     {
                         "rank": i + 1,
                         "name": r.get("板块名称", ""),
-                        "chg_pct": self._safe_float(r.get("涨幅")),
+                        "chg_pct": self._safe_float(r.get("涨跌幅")),
                         "turnover": self._safe_float(r.get("换手率")),
-                        "zt_count": self._safe_int(r.get("上涨家数", 0)),
-                        "dt_count": self._safe_int(r.get("下跌家数", 0)),
+                        # 接口只有"上涨家数"，没有涨停家数，不冒充
+                        "up_count": self._safe_int(r.get("上涨家数", 0)),
+                        "down_count": self._safe_int(r.get("下跌家数", 0)),
                         "lead_stock": r.get("领涨股票", ""),
                         "lead_chg": self._safe_float(r.get("领涨股票-涨跌幅")),
                     }
@@ -586,6 +664,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 板块排行异常: {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -608,41 +687,63 @@ class AStockDataFetcher:
         result = {
             "code": code,
             "name": "",
-            "price": 0.0,
-            "chg_pct": 0.0,
-            "is_zt": False,
+            # price/chg_pct/is_zt 为 None 表示实时行情不可用，调用方需判空
+            "price": None,
+            "chg_pct": None,
+            "is_zt": None,
             "consecutive_boards": 0,
         }
 
         try:
-            # 1. 个股基本信息 + 实时行情
+            # 1. 个股基本信息
+            # stock_individual_info_em 返回 item/value 键值表（每行一个字段），
+            # 实际键: 股票简称/总市值/流通市值/行业/上市时间 等，不含最新价/涨跌幅
             info_df = self._safe_call(
                 "stock_individual_info_em",
                 ak.stock_individual_info_em,
                 symbol=code,
             )
             if info_df is not None and len(info_df) > 0:
-                info = self._df_to_records(info_df)[0]
+                try:
+                    info = dict(zip(info_df["item"], info_df["value"]))
+                except Exception:
+                    info = {}
                 result.update({
-                    "name": info.get("股票名称", ""),
-                    "price": self._safe_float(info.get("最新价")),
-                    "chg_pct": self._safe_float(info.get("涨跌幅")),
-                    "open": self._safe_float(info.get("今开")),
-                    "high": self._safe_float(info.get("最高")),
-                    "low": self._safe_float(info.get("最低")),
-                    "volume": self._safe_float(info.get("成交量")),
-                    "amount": self._safe_float(info.get("成交额", 0)) / 1e8,
-                    "turnover": self._safe_float(info.get("换手率")),
-                    "volume_ratio": self._safe_float(info.get("量比")),
-                    "amplitude": self._safe_float(info.get("振幅")),
-                    "pe_ttm": self._safe_float(info.get("市盈率-动态")),
-                    "pb": self._safe_float(info.get("市净率")),
+                    "name": str(info.get("股票简称", "")),
                     "total_mv": self._safe_float(info.get("总市值", 0)) / 1e8,
                     "circ_mv": self._safe_float(info.get("流通市值", 0)) / 1e8,
-                    "sector_industry": info.get("行业", ""),
-                    "sector_concept": info.get("概念", ""),
+                    "sector_industry": str(info.get("行业", "")),
+                    "list_date": str(info.get("上市时间", "")),
                 })
-                result["is_zt"] = result["chg_pct"] >= 9.85
+
+            # 1b. 实时行情用 stock_bid_ask_em（同为 item/value 键值表）
+            bid_df = self._safe_call(
+                "stock_bid_ask_em", ak.stock_bid_ask_em, symbol=code
+            )
+            if bid_df is not None and len(bid_df) > 0:
+                try:
+                    bid = dict(zip(bid_df["item"], bid_df["value"]))
+                except Exception:
+                    bid = {}
+                price = self._safe_float(bid.get("最新"), None)
+                chg_pct = self._safe_float(bid.get("涨幅"), None)
+                zt_price = self._safe_float(bid.get("涨停"), None)
+                result.update({
+                    "price": price,
+                    "chg_pct": chg_pct,
+                    "open": self._safe_float(bid.get("今开")),
+                    "high": self._safe_float(bid.get("最高")),
+                    "low": self._safe_float(bid.get("最低")),
+                    "volume": self._safe_float(bid.get("总手")),
+                    "amount": self._safe_float(bid.get("金额", 0)) / 1e8,
+                    "turnover": self._safe_float(bid.get("换手")),
+                    "volume_ratio": self._safe_float(bid.get("量比")),
+                })
+                # 优先用涨停价比价判定，最可靠；缺涨停价时退回分市场阈值
+                if price is not None and zt_price:
+                    result["is_zt"] = price >= zt_price * 0.999
+                elif chg_pct is not None:
+                    result["is_zt"] = chg_pct >= zt_threshold(code, result.get("name", ""))
 
             # 2. 历史K线（近30日，用于计算均线）
             hist_df = self._safe_call(
@@ -667,10 +768,11 @@ class AStockDataFetcher:
                 if len(closes) >= 60:
                     result["ma60"] = round(sum(closes[-60:]) / 60, 2)
 
-                # 近期涨停记录检测
+                # 近期涨停记录检测（按市场/ST属性区分阈值）
+                _th = zt_threshold(code, result.get("name", ""))
                 recent_zt = [
                     h for h in hist[-10:]
-                    if self._safe_float(h.get("涨跌幅", h.get("pct_chg", 0))) >= 9.5
+                    if self._safe_float(h.get("涨跌幅", h.get("pct_chg", 0))) >= _th
                 ]
                 result["recent_zt_days"] = len(recent_zt)
 
@@ -682,7 +784,8 @@ class AStockDataFetcher:
                 market="sh" if code.startswith("6") else "sz",
             )
             if fund_df is not None and len(fund_df) > 0:
-                fund = self._df_to_records(fund_df)[0]
+                # stock_individual_fund_flow 按日期升序返回历史序列，[-1]才是最新一天
+                fund = self._df_to_records(fund_df)[-1]
                 result["fund_flow"] = {
                     "main_net": round(self._safe_float(fund.get("主力净流入-净额", 0)) / 1e4, 2),
                     "super_large_net": round(self._safe_float(fund.get("超大单净流入-净额", 0)) / 1e4, 2),
@@ -693,6 +796,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 个股查询异常(code={code}): {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -729,34 +833,44 @@ class AStockDataFetcher:
                 result["stock_code"] = code
 
             elif flow_type == "concept":
+                # 同花顺口径，实测列名: 序号/行业/行业指数/行业-涨跌幅/流入资金/流出资金/净额/公司家数/领涨股/领涨股-涨跌幅/当前价
                 df = self._safe_call(
                     "stock_fund_flow_concept", ak.stock_fund_flow_concept
                 )
                 if df is not None and len(df) > 0:
-                    records = self._df_to_records(df)[:20]
+                    records = self._df_to_records(df)
+                    records.sort(key=lambda x: self._ths_amount_yi(x.get("净额")), reverse=True)
                     result["top_inflow"] = [
                         {
-                            "name": r.get("名称", ""),
-                            "net_in": round(self._safe_float(r.get("主力净流入-净额", 0)) / 1e8, 2),
-                            "pct": round(self._safe_float(r.get("主力净流入-净占比", 0)), 2),
+                            "name": r.get("行业", ""),
+                            "net_in": round(self._ths_amount_yi(r.get("净额")), 2),  # 亿元
+                            "chg_pct": self._safe_float(r.get("行业-涨跌幅")),
+                            "lead_stock": r.get("领涨股", ""),
                         }
                         for r in records[:10]
                     ]
-                    result["top_outflow"] = sorted(
-                        records, key=lambda x: self._safe_float(x.get("主力净流入-净额", 0))
-                    )[:10]
+                    result["top_outflow"] = [
+                        {
+                            "name": r.get("行业", ""),
+                            "net_in": round(self._ths_amount_yi(r.get("净额")), 2),
+                            "chg_pct": self._safe_float(r.get("行业-涨跌幅")),
+                        }
+                        for r in records[-10:][::-1]
+                    ]
 
             elif flow_type == "industry":
+                # 同花顺口径，列名同 concept（行业/净额/...）
                 df = self._safe_call(
                     "stock_fund_flow_industry", ak.stock_fund_flow_industry
                 )
                 if df is not None and len(df) > 0:
-                    records = self._df_to_records(df)[:20]
+                    records = self._df_to_records(df)
+                    records.sort(key=lambda x: self._ths_amount_yi(x.get("净额")), reverse=True)
                     result["ranking"] = [
                         {
-                            "name": r.get("名称", ""),
-                            "net_in": round(self._safe_float(r.get("主力净流入-净额", 0)) / 1e8, 2),
-                            "pct": round(self._safe_float(r.get("主力净流入-净占比", 0)), 2),
+                            "name": r.get("行业", ""),
+                            "net_in": round(self._ths_amount_yi(r.get("净额")), 2),  # 亿元
+                            "chg_pct": self._safe_float(r.get("行业-涨跌幅")),
                         }
                         for r in records[:15]
                     ]
@@ -768,7 +882,8 @@ class AStockDataFetcher:
                 if df is not None and len(df) > 0:
                     records = self._df_to_records(df)
                     if records:
-                        latest = records[0]
+                        # 返回按日期升序的历史序列，[-1]才是最新一天
+                        latest = records[-1]
                         result = {
                             "date": latest.get("日期", date_str),
                             "main_net_in": round(self._safe_float(latest.get("主力净流入-净额", 0)) / 1e8, 2),
@@ -780,6 +895,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 资金流向异常: {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -801,8 +917,11 @@ class AStockDataFetcher:
 
         try:
             # 1. 龙虎榜详情
+            # 实测签名: stock_lhb_detail_em(start_date, end_date)，单日传同一天
+            # 实测列名: 代码/名称/上榜日/解读/收盘价/涨跌幅/龙虎榜净买额/龙虎榜买入额/龙虎榜卖出额/龙虎榜成交额/市场总成交额
             lhb_df = self._safe_call(
-                "stock_lhb_detail_em", ak.stock_lhb_detail_em, date=date_str
+                "stock_lhb_detail_em", ak.stock_lhb_detail_em,
+                start_date=date_str, end_date=date_str,
             )
             if lhb_df is not None and len(lhb_df) > 0:
                 records = self._df_to_records(lhb_df)
@@ -810,45 +929,52 @@ class AStockDataFetcher:
                     {
                         "code": r.get("代码", ""),
                         "name": r.get("名称", ""),
-                        "chg_pct": self._safe_float(r.get("涨跌幅", r.get("close_pct"))),
-                        "reason": r.get("上榜原因", ""),
-                        "buy_total": self._safe_float(r.get("买入总额", 0)) / 1e8,
-                        "sell_total": self._safe_float(r.get("卖出总额", 0)) / 1e8,
-                        "net_buy": round(
-                            self._safe_float(r.get("买入总额", 0))
-                            - self._safe_float(r.get("卖出总额", 0)), 2
+                        "chg_pct": self._safe_float(r.get("涨跌幅")),
+                        "reason": r.get("解读", r.get("上榜原因", "")),
+                        "buy_total": round(self._safe_float(r.get("龙虎榜买入额", 0)) / 1e8, 2),
+                        "sell_total": round(self._safe_float(r.get("龙虎榜卖出额", 0)) / 1e8, 2),
+                        "net_buy": round(self._safe_float(r.get("龙虎榜净买额", 0)) / 1e8, 2),
+                        "turnover_pct": round(
+                            self._safe_float(r.get("龙虎榜成交额", 0))
+                            / max(self._safe_float(r.get("市场总成交额", 0)), 1) * 100, 2
                         )
-                        / 1e8,
-                        "turnover_pct": self._safe_float(r.get("成交额", 0))
-                        / max(self._safe_float(r.get("总成交额", 0)), 1) * 100
-                        if self._safe_float(r.get("总成交额", 0)) > 0
+                        if self._safe_float(r.get("市场总成交额", 0)) > 0
                         else 0,
                     }
                     for r in records
                 ]
 
             # 2. 机构席位统计
+            # 实测签名: stock_lhb_jgstatistic_em(symbol="近一月")，是统计榜（非按日），不接受date参数
             inst_df = self._safe_call(
-                "stock_lhb_jgstatistic_em", ak.stock_lhb_jgstatistic_em, date=date_str
+                "stock_lhb_jgstatistic_em", ak.stock_lhb_jgstatistic_em, symbol="近一月"
             )
             if inst_df is not None and len(inst_df) > 0:
+                # 注意：这是"近一月"区间统计榜的榜首个股记录，非当日全市场机构汇总
                 inst = self._df_to_records(inst_df)[0]
+                buy_total = self._safe_float(
+                    inst.get("机构买入总额", inst.get("机构买入额", 0))
+                )
+                sell_total = self._safe_float(
+                    inst.get("机构卖出总额", inst.get("机构卖出额", 0))
+                )
                 result["institution_summary"] = {
-                    "buy_total": round(self._safe_float(inst.get("机构买入总额", 0)) / 1e8, 2),
-                    "sell_total": round(self._safe_float(inst.get("机构卖出总额", 0)) / 1e8, 2),
-                    "net_buy": round(
-                        self._safe_float(inst.get("机构买入总额", 0))
-                        - self._safe_float(inst.get("机构卖出总额", 0)),
-                        2,
-                    )
-                    / 1e8,
-                    "buy_count": self._safe_int(inst.get("机构买入家数")),
-                    "sell_count": self._safe_int(inst.get("机构卖出家数")),
+                    "period": "近一月",
+                    "buy_total": round(buy_total / 1e8, 2),
+                    "sell_total": round(sell_total / 1e8, 2),
+                    "net_buy": round((buy_total - sell_total) / 1e8, 2),
+                    "buy_count": self._safe_int(
+                        inst.get("机构买入家数", inst.get("机构买入次数"))
+                    ),
+                    "sell_count": self._safe_int(
+                        inst.get("机构卖出家数", inst.get("机构卖出次数"))
+                    ),
                 }
 
             # 3. 营业部排名（游资动向）
+            # 实测签名: stock_lhb_yybph_em(symbol="近一月")，是统计榜（非按日），不接受date参数
             yyb_df = self._safe_call(
-                "stock_lhb_yybph_em", ak.stock_lhb_yybph_em, date=date_str
+                "stock_lhb_yybph_em", ak.stock_lhb_yybph_em, symbol="近一月"
             )
             if yyb_df is not None and len(yyb_df) > 0:
                 records = self._df_to_records(yyb_df)
@@ -866,6 +992,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 龙虎榜异常: {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -886,28 +1013,41 @@ class AStockDataFetcher:
         result = {"date": date_str}
 
         try:
+            # 实测列名: 交易日/类型/板块/资金方向/交易状态/成交净买额/资金净流入/当日资金余额 等
+            # 返回的是当日4个渠道明细（沪股通/深股通/港股通沪/港股通深），不是5天历史
+            # 注意：北向当日资金2024-08后已停盘中披露，资金净流入可能为空
             df = self._safe_call(
                 "stock_hsgt_fund_flow_summary_em",
                 ak.stock_hsgt_fund_flow_summary_em,
             )
             if df is not None and len(df) > 0:
                 records = self._df_to_records(df)
-                if records:
-                    latest = records[0]  # 最新一天
+                # 按"类型/板块"含北向过滤（北向=沪股通+深股通）
+                north_rows = [
+                    r for r in records
+                    if "北向" in (str(r.get("类型", "")) + str(r.get("资金方向", "")))
+                    or str(r.get("板块", "")) in ("沪股通", "深股通")
+                ]
+                if north_rows:
+                    net = sum(self._safe_float(r.get("资金净流入", 0)) for r in north_rows)
                     result.update({
-                        "date": latest.get("日期", date_str),
-                        "net_buy_in": round(self._safe_float(latest.get("当日净流入", 0)) / 1e4, 2),  # 万元→亿元近似
-                        "historical_5d": [
+                        "date": str(north_rows[0].get("交易日", date_str)),
+                        "net_buy_in": round(net, 2),  # 亿元；停盘中披露时可能为0
+                        # 渠道明细（原historical_5d字段名错误：接口返回的是当日各渠道，非5日历史）
+                        "channels": [
                             {
-                                "d": r.get("日期", ""),
-                                "net": round(self._safe_float(r.get("当日净流入", 0)) / 1e4, 2),
+                                "channel": str(r.get("板块", "")),
+                                "net_in": round(self._safe_float(r.get("资金净流入", 0)), 2),
+                                "net_deal": round(self._safe_float(r.get("成交净买额", 0)), 2),
+                                "status": str(r.get("交易状态", "")),
                             }
-                            for r in records[:6]
+                            for r in north_rows
                         ],
                     })
 
         except Exception as e:
             log.error(f"❌ 北向资金异常: {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -1009,7 +1149,8 @@ class AStockDataFetcher:
                     boards = record["boards"]
 
                     # 首板或连板中断，开始新周期
-                    if boards == 1 or (current_cycle and boards != current_cycle["max_boards"] + 1):
+                    # current_cycle 为 None 时必须初始化（首条记录连板数>1时此前会 TypeError）
+                    if current_cycle is None or boards == 1 or boards != current_cycle["max_boards"] + 1:
                         if current_cycle:
                             cycles.append(current_cycle)
                         current_cycle = {
@@ -1047,6 +1188,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 个股连板历史分析异常(code={code}): {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -1161,15 +1303,17 @@ class AStockDataFetcher:
                         open_date_obj = datetime.strptime(first_open_date, "%Y%m%d")
                         days_diff = (start_date_obj - open_date_obj).days
 
-                        if -1 <= days_diff <= 3:
+                        # 日历日1-5天窗口（原1-3天，放宽以容忍周末）
+                        if -1 <= days_diff <= 5:
                             leader_type = "补涨龙"
                         elif days_diff > 10:
                             leader_type = "二波龙"
 
                     # 判断是否仍在连板中
+                    # 用日历日差<=3容忍周末（周一查周五涨停差3天，原<=1恒判"断板"）
                     last_date = datetime.strptime(leader["last_board_date"], "%Y%m%d")
                     today = datetime.strptime(end_date, "%Y%m%d")
-                    is_active = (today - last_date).days <= 1
+                    is_active = (today - last_date).days <= 3
 
                     leader["leader_type"] = leader_type
                     leader["is_active"] = is_active
@@ -1184,7 +1328,11 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 板块时间线分析异常(sector={sector_name}): {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
+        if not result["leaders"]:
+            # 空结果（可能是数据抓取失败导致），不落盘缓存
+            return result
         self._set_cache(cache_key, result)
         return result
 
@@ -1259,20 +1407,21 @@ class AStockDataFetcher:
             )
 
             if fund_df is not None and len(fund_df) > 0:
+                # 同花顺口径，实测列名: 行业/净额/流入资金/流出资金/行业-涨跌幅 等
                 fund_records = self._df_to_records(fund_df)
-                target_fund = [f for f in fund_records if f.get("名称") == concept_name]
+                target_fund = [f for f in fund_records if f.get("行业") == concept_name]
                 if target_fund:
                     fund = target_fund[0]
                     result["fund_flow"] = {
-                        "main_net": round(self._safe_float(fund.get("主力净流入-净额", 0)) / 1e8, 2),
-                        "main_pct": round(self._safe_float(fund.get("主力净流入-净占比", 0)), 2),
-                        "super_large": round(self._safe_float(fund.get("超大单净流入-净额", 0)) / 1e8, 2),
-                        "large": round(self._safe_float(fund.get("大单净流入-净额", 0)) / 1e8, 2)
+                        "main_net": round(self._ths_amount_yi(fund.get("净额")), 2),  # 亿元
+                        "inflow": round(self._ths_amount_yi(fund.get("流入资金")), 2),
+                        "outflow": round(self._ths_amount_yi(fund.get("流出资金")), 2),
+                        "chg_pct": self._safe_float(fund.get("行业-涨跌幅")),
                     }
 
-            # 3. 板块强度指标
+            # 3. 板块强度指标（全概念列表接口；spot_em是单概念详情接口，用错了）
             concept_df = self._safe_call(
-                "stock_board_concept_spot_em", ak.stock_board_concept_spot_em
+                "stock_board_concept_name_em", ak.stock_board_concept_name_em
             )
 
             if concept_df is not None and len(concept_df) > 0:
@@ -1281,15 +1430,16 @@ class AStockDataFetcher:
                 if target_concept:
                     concept = target_concept[0]
                     result["strength"] = {
-                        "chg_pct": self._safe_float(concept.get("涨幅")),
+                        "chg_pct": self._safe_float(concept.get("涨跌幅")),
                         "turnover": self._safe_float(concept.get("换手率")),
                         "up_count": self._safe_int(concept.get("上涨家数")),
                         "down_count": self._safe_int(concept.get("下跌家数")),
-                        "zt_count": self._safe_int(concept.get("涨停家数", 0))
+                        # 接口无"涨停家数"字段，不冒充
                     }
 
         except Exception as e:
             log.error(f"❌ 概念板块分析异常(concept={concept_name}): {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -1471,6 +1621,7 @@ class AStockDataFetcher:
 
         except Exception as e:
             log.error(f"❌ 技术指标分析异常(code={code}): {e}")
+            return result  # 失败结果禁止写缓存（缓存投毒）
 
         self._set_cache(cache_key, result)
         return result
@@ -1577,8 +1728,10 @@ class AStockDataFetcher:
         turnover = AStockDataFetcher._safe_float(stock_record.get("换手率", stock_record.get("turnover")))
         chg_pct = AStockDataFetcher._safe_float(stock_record.get("涨跌幅", stock_record.get("chg_pct")))
 
-        # 断板判断
-        if chg_pct < 9.5:
+        # 断板判断（按市场/ST属性区分阈值）
+        _code = stock_record.get("代码", stock_record.get("code", ""))
+        _name = stock_record.get("名称", stock_record.get("name", ""))
+        if chg_pct < zt_threshold(_code, _name):
             return "断板"
 
         # 一字板：开盘=涨停价 且 最低=涨停价
@@ -1606,7 +1759,10 @@ class AStockDataFetcher:
         turnover = AStockDataFetcher._safe_float(stock_record.get("换手率"))
         chg_pct = AStockDataFetcher._safe_float(stock_record.get("涨跌幅"))
 
-        if chg_pct < 9.5:
+        # 断板判断（按市场/ST属性区分阈值）
+        if chg_pct < zt_threshold(
+            stock_record.get("代码", ""), stock_record.get("名称", "")
+        ):
             return "断板"
 
         # 有炸板记录
@@ -1671,7 +1827,7 @@ class AStockDataFetcher:
                 color = "+" if chg >= 0 else ""
                 lines.append(
                     f"  {c['rank']}. {c['name']} ({color}{chg:.1f}%) "
-                    f"涨停{c.get('zt_count', 0)}家 | 领涨: {c.get('lead_stock', '')}"
+                    f"上涨{c.get('up_count', 0)}家 | 领涨: {c.get('lead_stock', '')}"
                 )
             lines.append("")
 
@@ -1718,14 +1874,15 @@ class AStockDataFetcher:
                 name = stock.get("name", "?")
                 code = stock.get("code", "?")
                 ctx = stock.get("_lianban_context", {})
-                chg = stock.get("chg_pct", 0)
+                chg = stock.get("chg_pct")  # 可能为None（实时行情不可用）
+                chg_txt = f"{chg:+.1f}%" if chg is not None else "N/A"
                 pattern = ctx.get("board_pattern", "?")
                 ff_local = stock.get("fund_flow", {})
                 main_ff = ff_local.get("main_net", 0) if ff_local else 0
                 lines.append(
-                    f"  {name}({code}) {chg:+.1f}% | {ctx.get('height', '?')}板 {pattern}"
+                    f"  {name}({code}) {chg_txt} | {ctx.get('height', '?')}板 {pattern}"
                     f" | 主力{'流入' if main_ff > 0 else '流出'}{abs(main_ff):.2f}万"
-                    f" | 换手{stock.get('turnover', 0):.1f}%"
+                    f" | 换手{stock.get('turnover') or 0:.1f}%"
                 )
             lines.append("")
 

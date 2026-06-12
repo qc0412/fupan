@@ -6,7 +6,7 @@ import os
 """
 
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
+sys.path.insert(0, os.path.expanduser('~/.claude/skills/fupan/scripts'))
 from astock_data import AStockDataFetcher
 import json
 

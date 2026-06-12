@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-import os
 """
 全市场涨停股扫描工具
 用于复盘时不遗漏任何优质标的
 """
 
+import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
 from astock_data import AStockDataFetcher

@@ -22,10 +22,17 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def _zt_threshold(code: str) -> float:
-    """该股今日视为『继续涨停』的涨幅阈值（创业板/科创板 20cm）"""
+def _zt_threshold(code: str, name: str = "") -> float:
+    """该股今日视为『继续涨停』的涨幅阈值
+    ST→4.8 / 创业板科创板(30/68)→19.0 / 北交所(43/83/87/88/92)→29.5 / 主板→9.5"""
+    if name and "ST" in str(name).upper():
+        return 4.8
     c = str(code)
-    return 19.0 if (c.startswith("30") or c.startswith("68")) else 9.5
+    if c.startswith(("30", "68")):
+        return 19.0
+    if c.startswith(("43", "83", "87", "88", "92")):
+        return 29.5
+    return 9.5
 
 
 def _safe_float(v, d=0.0):
@@ -98,14 +105,22 @@ def analyze(date_str: str) -> dict:
             rows = []
             for _, r in prev.iterrows():
                 code = str(r.get("代码", ""))
+                name = str(r.get("名称", ""))
                 chg = _safe_float(r.get("涨跌幅"))
                 yb = _safe_int(r.get("昨日连板数"), 1) or 1
+                # 优先用涨停价比价判晋级（最可靠），缺涨停价/最新价时退回阈值法
+                ztp = _safe_float(r.get("涨停价"))
+                last = _safe_float(r.get("最新价"))
+                if ztp > 0 and last > 0:
+                    zt_today = last >= ztp * 0.999
+                else:
+                    zt_today = chg >= _zt_threshold(code, name)
                 rows.append({
                     "code": code,
-                    "name": r.get("名称", ""),
+                    "name": name,
                     "chg": chg,
                     "yb": yb,
-                    "zt_today": chg >= _zt_threshold(code),
+                    "zt_today": zt_today,
                 })
             n = len(rows)
             up = sum(1 for x in rows if x["chg"] > 0)

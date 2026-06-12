@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
-import os
 """
-多维度复盘助手 - 整合开盘啦数据
+多维度复盘助手 - 多源数据（全AkShare）
 基于用户的8维度选股标准
 """
 
+# ⚠️ 本脚本为V4.0时代遗留：
+#   - 数据源共5个（资金流/人气/涨停/龙虎榜/板块龙头），全部走 AkShare；
+#     原第6/7数据源（开盘啦多日叠加/异动提醒）随开盘啦接口2026-06实测失效已删除；
+#   - "跟风数"为近似估算（按来源数量推测），禁止用于 /jieli 的跟风判定（/jieli 要求实数）；
+#   - 评分口径13分制已废弃（现行为V5.x框架100分制）。
+# 请勿将本脚本输出当作权威数据源。
+
+import os
 import sys
 import json
 from datetime import datetime, timedelta
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kailai_api import KaiLaiAPI
 
 
 class MultiDimensionReview:
     """多维度复盘分析器"""
 
     def __init__(self, date_str=None):
-        self.api = KaiLaiAPI()
         self.date = date_str or datetime.now().strftime('%Y-%m-%d')
         self.date_param = self.date.replace('-', '')
 
@@ -31,8 +34,6 @@ class MultiDimensionReview:
         3. 所有涨停股
         4. 龙虎榜股
         5. 强度前5板块的分别前5个股
-        6. 开盘啦多日叠加（强度、区间涨幅、区间净额）
-        7. 开盘啦异动提醒
         """
         all_stocks = {}  # 用字典去重，key=股票代码
 
@@ -125,44 +126,6 @@ class MultiDimensionReview:
                 all_stocks[code]['sources'].append(f"{stock['sector']}板块龙头")
                 all_stocks[code]['sector'] = stock['sector']
                 all_stocks[code]['sector_rank'] = stock['rank_in_sector']
-
-        # 6. 开盘啦多日叠加
-        print("\n6️⃣ 获取开盘啦多日叠加数据...")
-        multi_day_stocks = self._get_kailai_multi_day()
-        for stock in multi_day_stocks:
-            code = stock['code']
-            if code not in all_stocks:
-                all_stocks[code] = {
-                    'code': code,
-                    'name': stock['name'],
-                    'sources': ['开盘啦多日叠加'],
-                    'multi_day_strength': stock.get('strength', 0),
-                    'multi_day_gain': stock.get('gain', 0),
-                    'multi_day_net': stock.get('net', 0)
-                }
-            else:
-                all_stocks[code]['sources'].append('开盘啦多日叠加')
-                all_stocks[code]['multi_day_strength'] = stock.get('strength', 0)
-                all_stocks[code]['multi_day_gain'] = stock.get('gain', 0)
-                all_stocks[code]['multi_day_net'] = stock.get('net', 0)
-
-        # 7. 开盘啦异动提醒
-        print("\n7️⃣ 获取开盘啦异动提醒...")
-        alert_stocks = self._get_kailai_alerts()
-        for stock in alert_stocks:
-            code = stock['code']
-            if code not in all_stocks:
-                all_stocks[code] = {
-                    'code': code,
-                    'name': stock['name'],
-                    'sources': ['异动提醒'],
-                    'alert_type': stock.get('alert_type', ''),
-                    'alert_time': stock.get('alert_time', '')
-                }
-            else:
-                all_stocks[code]['sources'].append('异动提醒')
-                all_stocks[code]['alert_type'] = stock.get('alert_type', '')
-                all_stocks[code]['alert_time'] = stock.get('alert_time', '')
 
         # 统计
         print("\n" + "=" * 60)
@@ -287,14 +250,14 @@ class MultiDimensionReview:
 
             # 按成交额排序，取前10
             df_sorted = df.sort_values(by='成交额', ascending=False)
-            top10 = df_sorted.head(10)
 
             result = []
-            for idx, row in top10.iterrows():
+            # 注意：sort_values 后原始行号不等于名次，必须用 enumerate 计排名
+            for rank, (_, row) in enumerate(df_sorted.head(10).iterrows(), 1):
                 result.append({
                     'code': str(row['代码']),
                     'name': row['名称'],
-                    'rank': idx + 1,
+                    'rank': rank,
                     'volume': row['成交额'] / 100000000,  # 转换为亿
                     'change_pct': row.get('涨跌幅', 0)
                 })
@@ -307,24 +270,33 @@ class MultiDimensionReview:
             return []
 
     def _get_all_limit_up(self):
-        """获取所有涨停股"""
+        """获取所有涨停股（AkShare 涨停池，原开盘啦接口2026-06实测失效已迁移）"""
         try:
-            stocks = self.api.get_real_limit_up_stocks(
-                start_time="0925",
-                end_time="1500"
-            )
+            import akshare as ak
+            import warnings
+            warnings.filterwarnings('ignore')
 
-            # 转换格式
+            # 实测列名（2026-06-10）：序号/代码/名称/涨跌幅/最新价/成交额/流通市值/
+            # 总市值/换手率/封板资金/首次封板时间/最后封板时间/炸板次数/涨停统计/连板数/所属行业
+            df = ak.stock_zt_pool_em(date=self.date_param)
+
             result = []
-            for stock in stocks:
+            for _, row in df.iterrows():
                 result.append({
-                    'code': stock['code'],
-                    'name': stock['name'],
-                    'time': self._format_time(stock.get('time', '')),
-                    'boards': stock.get('boards', 1),
-                    'concept': stock.get('concept', ''),
-                    'turnover': stock.get('turnover', 0),
-                    'amount': stock.get('amount', 0)
+                    'code': str(row['代码']),
+                    'name': row['名称'],
+                    'change_pct': float(row['涨跌幅']),
+                    'time': self._format_time(str(row['首次封板时间'])),
+                    'boards': int(row['连板数']) if '连板数' in row else 1,
+                    # 开盘啦的题材概念字段已不可得，用东财"所属行业"近似
+                    # （行业≠题材，主线归类仍须走 plate_classifier）
+                    'concept': row.get('所属行业', ''),
+                    'sector': row.get('所属行业', ''),
+                    'seal_amount': float(row.get('封板资金', 0)),
+                    'open_times': int(row.get('炸板次数', 0)),
+                    'turnover': float(row.get('换手率', 0)),
+                    # 成交额原始单位为元，转为万元（_score_volume 按万元口径换算亿）
+                    'amount': float(row.get('成交额', 0)) / 10000
                 })
 
             print(f"   ✅ 获取到 {len(result)} 只涨停股")
@@ -377,7 +349,7 @@ class MultiDimensionReview:
 
             result = []
 
-            for idx, sector_row in top5_sectors.iterrows():
+            for _, sector_row in top5_sectors.iterrows():
                 sector_name = sector_row['板块名称']
 
                 # 获取该板块的成分股
@@ -385,15 +357,16 @@ class MultiDimensionReview:
                     stocks_df = ak.stock_board_industry_cons_em(symbol=sector_name)
 
                     # 按涨跌幅排序，取前5只
+                    # 注意：sort_values 后原始行号不等于名次，必须用 enumerate 计板块内排名
                     stocks_df_sorted = stocks_df.sort_values(by='涨跌幅', ascending=False)
-                    top5_stocks = stocks_df_sorted.head(5)
 
-                    for stock_idx, stock_row in top5_stocks.iterrows():
+                    for rank_in_sector, (_, stock_row) in enumerate(
+                            stocks_df_sorted.head(5).iterrows(), 1):
                         result.append({
                             'code': str(stock_row['代码']),
                             'name': stock_row['名称'],
                             'sector': sector_name,
-                            'rank_in_sector': stock_idx + 1,
+                            'rank_in_sector': rank_in_sector,
                             'change_pct': stock_row.get('涨跌幅', 0)
                         })
                 except Exception as e:
@@ -407,25 +380,14 @@ class MultiDimensionReview:
             print(f"   ⚠️ 板块龙头数据获取失败: {e}")
             return []
 
-    def _get_kailai_multi_day(self):
-        """获取开盘啦多日叠加数据"""
-        # TODO: 需要开盘啦API支持
-        # 暂时返回空列表
-        print(f"   ⚠️ 多日叠加数据暂不可用（需要开盘啦API）")
-        return []
-
-    def _get_kailai_alerts(self):
-        """获取开盘啦异动提醒"""
-        # TODO: 需要开盘啦API支持
-        # 暂时返回空列表
-        print(f"   ⚠️ 异动提醒数据暂不可用（需要开盘啦API）")
-        return []
-
     def _format_time(self, time_str):
         """格式化时间字符串"""
         if not time_str:
             return ''
-        # 如果是4位数字，转换为HH:MM格式
+        # 6位数字（AkShare首次封板时间，HHMMSS）→ HH:MM（丢秒，兼容评分解析）
+        if len(time_str) == 6 and time_str.isdigit():
+            return f"{time_str[:2]}:{time_str[2:4]}"
+        # 4位数字，转换为HH:MM格式
         if len(time_str) == 4 and time_str.isdigit():
             return f"{time_str[:2]}:{time_str[2:]}"
         return time_str
@@ -591,15 +553,26 @@ def main():
     parser.add_argument('--action', choices=['pool', 'score', 'full'],
                        default='full',
                        help='pool=构建股票池, score=评分, full=完整复盘')
+    parser.add_argument('--force', action='store_true',
+                       help='指定历史日期时强制继续（数据源大部分为实时，历史结果不可信）')
 
     args = parser.parse_args()
 
+    # --date 跨日防护：除龙虎榜/涨停池外其余数据源全是实时数据，历史日期混拼结果不可信
+    today = datetime.now().strftime('%Y-%m-%d')
+    if args.date and args.date != today:
+        print("⚠️ 仅龙虎榜/涨停池支持历史日期，其余数据源（资金流/人气/板块）均为实时数据，"
+              "历史复盘结果不可信")
+        if not args.force:
+            print("如确认要继续，请加 --force 参数。已退出。")
+            sys.exit(1)
+
     reviewer = MultiDimensionReview(args.date)
 
-    if args.action in ['pool', 'full']:
-        # 构建股票池
-        stocks = reviewer.get_all_stocks_to_review()
+    # 股票池只构建一次，pool/score/full 复用同一结果（避免 full 双倍请求）
+    stocks = reviewer.get_all_stocks_to_review()
 
+    if args.action in ['pool', 'full']:
         print("\n" + "=" * 60)
         print("📋 股票池详情（按来源数量排序）")
         print("=" * 60)
@@ -618,9 +591,7 @@ def main():
                 print(f"   成交额: {stock['volume']:.2f}亿")
 
     if args.action in ['score', 'full']:
-        # 评分
-        stocks = reviewer.get_all_stocks_to_review()
-
+        # 评分（复用上面已构建的股票池，不重复请求）
         print("\n" + "=" * 60)
         print("🎯 8维度评分（>=9分重点关注）")
         print("=" * 60)

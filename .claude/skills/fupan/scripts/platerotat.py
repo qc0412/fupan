@@ -228,8 +228,14 @@ def print_summary(r):
     print(f"{'排名':>3} {'板块':<12}{'强度':>8}{'上榜天数':>7}  趋势   近5日排名")
     for p in r["plate_trends"]:
         recent = " ".join(str(x) if x is not None else "-" for x in p["ranks"][:5])
-        print(f"{p['cur_rank']:>3} {p['name']:<12}{p['cur_strength']:>8}"
-              f"{p['on_board_days']:>6}日  {p['trend']:<4} {recent}")
+        # 各字段可能为None，统一用"-"防护，避免格式化崩溃
+        cur_rank = p["cur_rank"] if p.get("cur_rank") is not None else "-"
+        cur_strength = p["cur_strength"] if p.get("cur_strength") is not None else "-"
+        on_board_days = p["on_board_days"] if p.get("on_board_days") is not None else "-"
+        trend = p["trend"] if p.get("trend") is not None else "-"
+        name = p["name"] if p.get("name") is not None else "-"
+        print(f"{cur_rank:>3} {name:<12}{cur_strength:>8}"
+              f"{on_board_days:>6}日  {trend:<4} {recent}")
     if "plate_detail" in r:
         print(f"\n已深挖 {len(r['plate_detail'])} 个板块（强度/量能序列 + 领涨个股）")
 

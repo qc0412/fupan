@@ -14,6 +14,10 @@ A股短线情绪分析算法引擎 v3.0
 - 策略生成引擎（含T+1约束与置信度）
 
 数据来源: astock_data.py (akshare)
+
+TODO: 接入 premium_ladder.py 的真实晋级率/昨日涨停平均涨幅(avg_chg)，
+      替代 _build_sentiment_input 中置 None 的 yest_zt_avg_chg / yest_lianban_promote_rate /
+      yest_duanban_nuclear（当前为 None 时相关维度跳过判定、不参与评分）。
 """
 
 from __future__ import annotations
@@ -24,6 +28,21 @@ import statistics
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+
+def zt_threshold(code: str, name: str = "") -> float:
+    """
+    按市场/ST属性返回"视为涨停"的涨跌幅判定阈值(%)（与 astock_data.zt_threshold 同款）
+    - name含ST/*ST → 4.8；30/68开头 → 19.5；43/83/87/88/92开头(北交所) → 29.5；其余 → 9.8
+    """
+    if name and "ST" in str(name).upper():
+        return 4.8
+    c = str(code)
+    if c.startswith(("30", "68")):
+        return 19.5
+    if c.startswith(("43", "83", "87", "88", "92")):
+        return 29.5
+    return 9.8
 
 
 # ════════════════════════════════════
@@ -44,10 +63,10 @@ class SentimentInput:
     try_zt_total: int = 0
     zab_rate: float = 0.0
 
-    # 昨日反馈（核心！）
-    yest_zt_avg_chg: float = 0.0
-    yest_lianban_promote_rate: float = 0.0
-    yest_duanban_nuclear: int = 0
+    # 昨日反馈（核心！）None = 数据缺失，相关判定跳过、不参与评分
+    yest_zt_avg_chg: Optional[float] = None
+    yest_lianban_promote_rate: Optional[float] = None
+    yest_duanban_nuclear: Optional[int] = None
 
     # 跌停相关
     dt_count: int = 0
@@ -137,6 +156,7 @@ def calc_sentiment_score(d: SentimentInput) -> dict:
     scores['zt_heat'] = _score_zt_heat(d.zt_count, d.zt_count_yesterday)
 
     # 维度2：昨日赚钱效应（权重25%，最核心）
+    # 数据缺失(None)时返回None → 该维度不参与评分（权重重新归一），不按0触发假信号
     scores['money_effect'] = _score_money_effect(d.yest_zt_avg_chg, d.yest_lianban_promote_rate)
 
     # 维度3：连板梯队健康度（权重20%）
@@ -151,9 +171,10 @@ def calc_sentiment_score(d: SentimentInput) -> dict:
     # 维度6：崩溃前兆链检测（权重10%，扣分项）
     scores['collapse_chain'] = _score_collapse_chain(d)
 
-    # 所有维度安全clamp到[0,10]
+    # 所有维度安全clamp到[0,10]（None=数据缺失，跳过）
     for key in scores:
-        scores[key] = max(0.0, min(10.0, scores[key]))
+        if scores[key] is not None:
+            scores[key] = max(0.0, min(10.0, scores[key]))
 
     # 加权综合分
     weights = {
@@ -165,18 +186,27 @@ def calc_sentiment_score(d: SentimentInput) -> dict:
         'collapse_chain': 0.10,
     }
 
-    total = sum(scores[k] * weights[k] for k in weights)
+    # 数据缺失维度不参与评分，剩余维度权重重新归一
+    avail = {k: w for k, w in weights.items() if scores.get(k) is not None}
+    w_sum = sum(avail.values())
+    if w_sum > 0:
+        total = sum(scores[k] * w for k, w in avail.items()) / w_sum
+    else:
+        total = 5.0  # 全部缺失时给中性分
     score = round(max(0.0, min(10.0, total)), 1)
 
     confidence = _calc_score_confidence(scores, d)
     phase = _map_phase(score, scores)
     warnings = _generate_warnings(scores, d)
+    missing_dims = [k for k, v in scores.items() if v is None]
+    if missing_dims:
+        warnings.append(f"ℹ️ 数据缺失未参与评分: {', '.join(missing_dims)}")
 
     return {
         'score': score,
         'phase': phase,
         'phase_detail': PHASE_RULES_DETAIL.get(phase, ("未知", "", "")),
-        'dim_scores': {k: round(v, 1) for k, v in scores.items()},
+        'dim_scores': {k: (round(v, 1) if v is not None else None) for k, v in scores.items()},
         'weights': weights,
         'warnings': warnings,
         'confidence': confidence,
@@ -189,10 +219,10 @@ def _calc_score_confidence(dim_scores: dict, d: SentimentInput) -> int:
 
     if len(d.height_history) != 5:
         conf -= 15
-    if d.yest_zt_avg_chg == 0 and d.yest_lianban_promote_rate == 0:
+    if d.yest_zt_avg_chg in (None, 0) and d.yest_lianban_promote_rate in (None, 0):
         conf -= 20
 
-    values = list(dim_scores.values())
+    values = [v for v in dim_scores.values() if v is not None]  # None=数据缺失，剔除
     if values:
         try:
             std = statistics.stdev(values)
@@ -216,13 +246,21 @@ def _score_zt_heat(zt_today: int, zt_yest: int) -> float:
     return 1.0
 
 
-def _score_money_effect(avg_chg: float, promote_rate: float) -> float:
+def _score_money_effect(avg_chg, promote_rate):
+    """avg_chg/promote_rate 为 None 表示数据缺失：两者都缺返回None(该维度不评分)，缺一项用另一项"""
+    if avg_chg is None and promote_rate is None:
+        return None
+
     chg_thresholds = [(5, 10), (3, 8), (1, 6), (0, 4), (-2, 2)]
-    s_chg = next((s for t, s in chg_thresholds if avg_chg >= t), 0)
+    s_chg = None if avg_chg is None else next((s for t, s in chg_thresholds if avg_chg >= t), 0)
 
     pro_thresholds = [(60, 10), (45, 8), (30, 6), (15, 4)]
-    s_pro = next((s for t, s in pro_thresholds if promote_rate >= t), 1)
+    s_pro = None if promote_rate is None else next((s for t, s in pro_thresholds if promote_rate >= t), 1)
 
+    if s_chg is None:
+        return round(float(s_pro), 1)
+    if s_pro is None:
+        return round(float(s_chg), 1)
     return round(s_chg * 0.6 + s_pro * 0.4, 1)
 
 
@@ -241,7 +279,8 @@ def _score_lianban_health(lianban_cnt: int, max_h: int, height_hist: list) -> fl
     return round(s_cnt * 0.35 + s_height * 0.40 + s_trend * 0.25, 1)
 
 
-def _score_negative_feedback(zab_cnt: int, zab_rate: float, nuclear_cnt: int, dt_cnt: int) -> float:
+def _score_negative_feedback(zab_cnt: int, zab_rate: float, nuclear_cnt, dt_cnt: int) -> float:
+    nuclear_cnt = 0 if nuclear_cnt is None else nuclear_cnt  # 数据缺失不扣分
     s_zab = max(0, 10 - min(zab_cnt * 0.5, 10))
     rate_penalty = 3 if zab_rate > 50 else (2 if zab_rate > 40 else (1 if zab_rate > 30 else 0))
     s_zab -= rate_penalty
@@ -266,8 +305,8 @@ def _score_collapse_chain(d: SentimentInput) -> float:
     score = 10.0
     deductions = []
 
-    # Level 1: 追涨者亏钱
-    if d.yest_zt_avg_chg < 1.0:
+    # Level 1: 追涨者亏钱（数据缺失None时跳过该项判定，不按0扣分制造假信号）
+    if d.yest_zt_avg_chg is not None and d.yest_zt_avg_chg < 1.0:
         score -= 2.0
         deductions.append(f"L1-追涨亏损(昨均幅{d.yest_zt_avg_chg}%)")
 
@@ -278,8 +317,8 @@ def _score_collapse_chain(d: SentimentInput) -> float:
             score -= 2.0
             deductions.append(f"L2-活跃骤降({drop_ratio*100:.0f}%)")
 
-    # Level 4: 高位补跌
-    if d.max_lianban >= 5 and d.yest_duanban_nuclear >= 2:
+    # Level 4: 高位补跌（核按钮数据缺失None时跳过）
+    if d.max_lianban >= 5 and d.yest_duanban_nuclear is not None and d.yest_duanban_nuclear >= 2:
         score -= 2.0
         deductions.append(f"L4-高位补跌(核按钮{d.yest_duanban_nuclear}家)")
 
@@ -299,7 +338,8 @@ def _score_collapse_chain(d: SentimentInput) -> float:
 def _generate_warnings(dim_scores: dict, d: SentimentInput) -> list[str]:
     warnings_list = []
 
-    if dim_scores.get('money_effect', 10) <= 2:
+    _me = dim_scores.get('money_effect', 10)
+    if _me is not None and _me <= 2:
         warnings_list.append("⚠️ 赚钱效应极差，追涨资金大幅亏损")
     if dim_scores.get('collapse_chain', 10) <= 4:
         warnings_list.append("⚠️ 检测到崩溃前兆信号链")
@@ -350,7 +390,8 @@ def classify_board_pattern(stock_data: dict) -> BoardPattern:
     turnover = get('turnover')
     chg_pct = get('chg_pct', 0)
 
-    if chg_pct < 9.5:
+    # 断板判断按市场/ST属性区分阈值（防ST涨停股被误判断板）
+    if chg_pct < zt_threshold(stock_data.get('code', ''), stock_data.get('name', '')):
         return BoardPattern.DUANBAN
     if abs(open_p - zt_price) < 0.02 and abs(low_p - zt_price) < 0.02:
         return BoardPattern.YIZI
@@ -382,7 +423,9 @@ def diagnose_doujie(stock_history: list[dict]) -> DoujieResult:
         result.is_doujie = True
         result.doujie_type = "炸板渡劫"
         result.doujie_level = min(5, open_times)
-        if today.get('close') == today.get('zt_price'):
+        # 回封判定：避免浮点直等比较；任一为None不判回封
+        _close, _ztp = today.get('close'), today.get('zt_price')
+        if _close is not None and _ztp is not None and abs(_close - _ztp) < 0.001:
             result.survival_prob = 0.7
             result.advice = "回封可轻仓介入（分歧转一致买点）"
         else:
@@ -717,13 +760,21 @@ def judge_mainline(sectors: list, sentiment_score: float) -> dict:
         return {'exists': False, 'reason': '无活跃板块'}
 
     top = sectors[0] if sectors else {}
-    cond1 = top.get('zt_ratio', 0) >= 0.20
-    cond2 = top.get('ladder_health', 0) >= 3
-    cond3 = top.get('active_days', 1) >= 2
+    # 各条件数据缺失(None)时跳过该项判定，不按0/假数据触发假信号
+    _zt_ratio = top.get('zt_ratio')
+    _ladder_health = top.get('ladder_health')
+    _active_days = top.get('active_days')
+    cond1 = None if _zt_ratio is None else _zt_ratio >= 0.20
+    cond2 = None if _ladder_health is None else _ladder_health >= 3
+    cond3 = None if _active_days is None else _active_days >= 2
     level = _classify_theme_level(top)
-    exists = cond1 and cond2 and cond3
+    known = [c for c in (cond1, cond2, cond3) if c is not None]
+    exists = bool(known) and all(known)
+    missing = [name for name, c in
+               (('c1_占比达标', cond1), ('c2_梯队健康', cond2), ('c3_持续活跃', cond3))
+               if c is None]
 
-    return {
+    result = {
         'exists': exists,
         'top_sector': top.get('name', ''),
         'level': level.value[0] if exists else None,
@@ -735,6 +786,9 @@ def judge_mainline(sectors: list, sentiment_score: float) -> dict:
             else "无明显主线"
         ),
     }
+    if missing:
+        result['data_note'] = f"数据缺失未参与评分: {', '.join(missing)}"
+    return result
 
 
 def _classify_theme_level(info: dict) -> ThemeLevel:
@@ -977,7 +1031,11 @@ def analyze_reflexivity_cycle(market_state: dict) -> dict:
 def behavior_chain_monitor(data: dict) -> list[str]:
     """行为链条监控"""
     alerts = []
-    avg = data.get('yest_zt_avg_chg', 0)
+    avg = data.get('yest_zt_avg_chg')
+
+    if avg is None:
+        alerts.append("ℹ️ 追涨者: 昨日涨停表现数据缺失，未参与判定")
+        return alerts
 
     if avg >= 5:
         alerts.append("✅ 追涨者: 赚钱效应强 → 模仿资金可能进场")
@@ -1063,12 +1121,14 @@ def daily_sentiment_pipeline(raw_data: dict) -> dict:
 def _build_sentiment_input(raw: dict) -> SentimentInput:
     """从raw_data构建SentimentInput对象"""
     zt = raw.get('zt_dt', {})
-    
-    # 计算昨日反馈（简化版，实际应从历史数据计算）
-    yest_zt_avg_chg = 0.0
-    yest_promote_rate = 0.0
-    yest_nuclear = 0
-    
+
+    # 昨日反馈数据当前无真实来源：置 None = 数据缺失，下游遇 None 跳过判定/不扣分
+    # （此前硬编码0会触发"L1-追涨亏损每天扣2分"等假信号）
+    # TODO: 接入 premium_ladder.py 的真实 avg_chg / 晋级率 / 核按钮数
+    yest_zt_avg_chg = None
+    yest_promote_rate = None
+    yest_nuclear = None
+
     # 如果有连板数据，尝试推断晋级率
     lb = raw.get('lianban', {})
     summary = lb.get('summary', {})
@@ -1112,7 +1172,7 @@ def _run_dragon_analysis(raw: dict) -> dict:
         concept_top = sectors.get('concept_top10', [])
         avg_chg = 0.0
         if concept_top:
-            avg_chg = sum(c.get('chg_pct', 0) for c in concept_top[:5]) / min(len(concept_top[:5]), 1)
+            avg_chg = sum(c.get('chg_pct', 0) for c in concept_top[:5]) / max(len(concept_top[:5]), 1)
 
         ctx = {
             'sector_avg_chg': avg_chg,
@@ -1132,10 +1192,16 @@ def _run_dragon_analysis(raw: dict) -> dict:
 
 
 def _build_sector_analysis(raw: dict, sentiment: dict) -> dict:
-    """板块分析 + 主线判断"""
+    """板块分析 + 主线判断
+
+    zt_ratio/ladder_health/active_days 当前无真实数据来源，置 None = 数据缺失，
+    judge_mainline 遇 None 跳过该条件判定并标注"数据缺失未参与评分"
+    （此前硬编码 zt_ratio=0.1/active_days=1 会产生假信号）。
+    TODO: 接入真实板块涨停占比/梯队健康度/持续活跃天数。
+    """
     sec = raw.get('sectors', {})
-    sectors_list = [{'name': c.get('name', ''), 'zt_ratio': 0.1,
-                     'ladder_health': 5.0, 'active_days': 1}
+    sectors_list = [{'name': c.get('name', ''), 'zt_ratio': None,
+                     'ladder_health': None, 'active_days': None}
                     for c in sec.get('concept_top10', [])[:5]]
 
     mainline = judge_mainline(

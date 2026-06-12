@@ -9,7 +9,7 @@
 2. ✅ 计算市场情绪温度（量化打分）
 3. ✅ 识别龙头股票并打分（10分制）
 4. ✅ 区分龙头类型（妖股/趋势龙头/先锋龙）
-5. ✅ 自动推送复盘报告到企业微信
+5. ✅ （可选）推送今日事实摘要到企业微信（V5.2：只推今日事实，无前瞻/仓位/建议字段，用户要求时才执行）
 
 ---
 
@@ -25,7 +25,7 @@
 1. 自动调用 `fupan_helper.py` 获取 A股数据
 2. 分析市场情绪、龙头股票、板块共振
 3. 生成完整复盘报告
-4. 自动推送摘要到企业微信
+4. （可选）用户要求推送时，推送今日事实摘要到企业微信
 
 ---
 
@@ -65,20 +65,19 @@
 }
 ```
 
-### 2. 推送到企业微信
+### 2. 推送到企业微信（可选，V5.2：只推今日事实，字段清单见 SKILL.md「📤 企业微信推送」）
 ```bash
 ~/.claude/mcp-servers/astock-data/venv/bin/python3 \
   ~/.claude/skills/fupan/fupan_helper.py push --message '{
-    "date": "2026-04-28",
-    "emotion_score": 35,
-    "emotion_status": "冰点期",
-    "leader_name": "维科技术",
-    "leader_boards": 3,
-    "leader_time": "09:40",
-    "leader_sector": "电池",
-    "leader_score": "5.5",
-    "position_limit": "0-10%",
-    "suggestion": "空仓观望"
+    "date": "2026-06-10",
+    "emotion_score": 45,
+    "limit_up_count": 62,
+    "limit_down_count": 3,
+    "failed_rate": 18,
+    "max_boards": 6,
+    "space_board_name": "某空间板",
+    "top_sectors": [{"name": "板块A", "limit_up_count": 12}],
+    "leaders": [{"name": "股一", "boards": 6, "sector": "板块A"}]
   }'
 ```
 
@@ -156,9 +155,9 @@ pip install akshare requests
 ```
 
 ### 2. 企业微信 Webhook
-已配置 Webhook 地址：
+key 获取顺序：环境变量 `WECOM_WEBHOOK_KEY` → 文件 `~/.config/fupan/wecom_key` → 都没有则警告并跳过推送（明文勿入文档）：
 ```
-https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7a61a49c-2fc9-4d57-bbbb-7e09bb217947
+https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${WECOM_WEBHOOK_KEY}
 ```
 
 ---

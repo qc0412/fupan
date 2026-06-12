@@ -12,6 +12,13 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 
+def _first(table, key, default=0):
+    """安全取 rawTable 中 key 对应列表的首元素（key缺失/值为空列表/首元素为空时返回 default）"""
+    v = table.get(key) or [default]
+    first = v[0] if v else default
+    return default if first in (None, '') else first
+
+
 class DFCFData:
     """东方财富妙想数据客户端"""
 
@@ -115,8 +122,8 @@ class DFCFData:
                 table = tables[0].get('rawTable', {})
                 if 'f2' in table and table['f2']:  # f2 是最新价/收盘价
                     result['sz_index'] = {
-                        'close': float(table['f2'][0]) if table['f2'] else 0,
-                        'change_pct': float(table.get('f3', [0])[0]) if 'f3' in table else 0  # f3 是涨跌幅
+                        'close': float(_first(table, 'f2')),
+                        'change_pct': float(_first(table, 'f3'))  # f3 是涨跌幅
                     }
 
         # 查询创业板指数
@@ -130,8 +137,8 @@ class DFCFData:
                 table = tables[0].get('rawTable', {})
                 if 'f2' in table and table['f2']:
                     result['cyb_index'] = {
-                        'close': float(table['f2'][0]) if table['f2'] else 0,
-                        'change_pct': float(table.get('f3', [0])[0]) if 'f3' in table else 0
+                        'close': float(_first(table, 'f2')),
+                        'change_pct': float(_first(table, 'f3'))
                     }
 
         return result
@@ -227,10 +234,10 @@ class DFCFData:
                 result = {
                     'name': entity_tag.get('fullName', stock_name),
                     'code': entity_tag.get('secuCode', ''),
-                    'price': float(table.get('f2', [0])[0]) if 'f2' in table else 0,
-                    'change_pct': float(table.get('f3', [0])[0]) if 'f3' in table else 0,
-                    'turnover': float(table.get('f8', [0])[0]) if 'f8' in table else 0,  # f8 换手率
-                    'volume': float(table.get('f5', [0])[0]) if 'f5' in table else 0  # f5 成交量
+                    'price': float(_first(table, 'f2')),
+                    'change_pct': float(_first(table, 'f3')),
+                    'turnover': float(_first(table, 'f8')),  # f8 换手率
+                    'volume': float(_first(table, 'f5'))  # f5 成交量
                 }
 
         return result
@@ -263,15 +270,17 @@ class DFCFData:
         result = []
 
         if data and 'data' in data:
-            tables = data['data'].get('dataTableDTOList', [])
+            # 与其它方法对齐的正确路径：data.data.searchDataResultDTO.dataTableDTOList + rawTable
+            search_result = data.get('data', {}).get('data', {}).get('searchDataResultDTO', {})
+            tables = search_result.get('dataTableDTOList', [])
             for table_dto in tables:
                 entity_tag = table_dto.get('entityTagDTO', {})
-                table = table_dto.get('table', {})
+                table = table_dto.get('rawTable', {})
 
                 result.append({
                     'name': entity_tag.get('fullName', ''),
                     'code': entity_tag.get('secuCode', ''),
-                    'change_pct': float(table.get('ZDF', [0])[0]) if 'ZDF' in table else 0
+                    'change_pct': float(_first(table, 'f3'))  # f3 涨跌幅
                 })
 
         return result

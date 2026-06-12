@@ -8,7 +8,7 @@ import sys
 import json
 from datetime import datetime
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.expanduser('~/.claude/skills/fupan'))
 from multi_dimension_review import MultiDimensionReview
 
 

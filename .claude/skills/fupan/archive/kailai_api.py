@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 """
+⚠️⚠️⚠️ DEPRECATED（2026-06 实测已失效）⚠️⚠️⚠️
+实测症状（2026-06-09/10）：
+  - 匿名 POST 返回 HTTP 200，但 result['list'] 恒为空列表；
+  - 历史日期参数被服务端忽略（请求 Date=20260609 仍返回 Day=["2026-06-10"]）。
+替代方案：请改用 AkShare 的 stock_zt_pool_em（涨停池）等接口获取涨停板数据。
+本文件仅保留作参考，调用方收到空列表时会打印醒目警告。
+
 开盘啦 API 接口封装
 用于获取A股涨停板数据
 """
@@ -8,6 +15,12 @@ import requests
 import json
 from datetime import datetime
 from typing import List, Dict, Optional
+
+
+DEPRECATED_WARNING = (
+    "⚠️ 开盘啦接口返回空数据——该接口2026-06实测已失效"
+    "（200但list恒空、历史日期参数被忽略），请改用 AkShare stock_zt_pool_em"
+)
 
 
 class KaiLaiAPI:
@@ -97,27 +110,45 @@ class KaiLaiAPI:
 
             result = response.json()
             stocks = []
+            warned_bad_field = False  # 字段类型异常只警告一次
 
             if 'list' in result and isinstance(result['list'], list):
                 for item in result['list']:
                     if isinstance(item, list) and len(item) > 10:
+                        # 类型校验：关键数值字段不是数字则跳过该条，防字段调序静默错数
+                        try:
+                            change_pct = float(item[6])
+                            price = float(item[5])
+                        except (TypeError, ValueError):
+                            if not warned_bad_field:
+                                print(
+                                    "⚠️ 开盘啦返回字段类型异常（change_pct/price 非数字），"
+                                    "可能字段顺序已变更，已跳过异常条目，请人工核对 FIELD_MAPPING"
+                                )
+                                warned_bad_field = True
+                            continue
+
                         stock = {
                             'code': item[0],
                             'name': item[1],
                             'boards': item[3],
                             'concept': item[4],
-                            'price': item[5],
-                            'change_pct': item[6],
+                            'price': price,
+                            'change_pct': change_pct,
                             'volume': item[7],
                             'turnover': item[8],
                             'amount': item[10],
                         }
                         stocks.append(stock)
 
+            if not stocks:
+                print(DEPRECATED_WARNING)
+
             return stocks
 
         except Exception as e:
             print(f"获取数据失败: {e}")
+            print(DEPRECATED_WARNING)
             return []
 
     def get_limit_up_by_time(
@@ -157,21 +188,41 @@ class KaiLaiAPI:
 
         return result
 
+    @staticmethod
+    def _limit_up_threshold(code: str, name: str) -> float:
+        """
+        按代码前缀/名称返回涨停判定阈值：
+        - 30/68 开头（创业板/科创板，20cm）→ 19.5
+        - 43/83/87/88/92 开头（北交所，30cm）→ 29.5
+        - 名称含 ST（5cm）→ 4.8
+        - 其余主板（10cm）→ 9.8
+        """
+        code = str(code)
+        name = str(name)
+        if 'ST' in name.upper():
+            return 4.8
+        if code.startswith(('43', '83', '87', '88', '92')):
+            return 29.5
+        if code.startswith(('30', '68')):
+            return 19.5
+        return 9.8
+
     def get_real_limit_up_stocks(
         self,
         date: str = "",
         start_time: str = "0925",
         end_time: str = "0950",
-        min_change_pct: float = 9.9
+        min_change_pct: Optional[float] = None
     ) -> List[Dict]:
         """
-        获取真正的涨停板股票（涨幅>=9.9%）
+        获取真正的涨停板股票（按板块分别判定涨停阈值）
 
         Args:
             date: 日期，格式YYYYMMDD，空表示今天
             start_time: 开始时间，格式HHMM
             end_time: 结束时间，格式HHMM
-            min_change_pct: 最小涨幅，默认9.9%
+            min_change_pct: 最小涨幅；None（默认）时按代码前缀/ST自动分阈值
+                            （30/68→19.5，43/83/87/88/92→29.5，ST→4.8，其余→9.8）
 
         Returns:
             涨停板股票列表
@@ -183,11 +234,17 @@ class KaiLaiAPI:
             end_time=end_time
         )
 
-        # 筛选涨幅>=min_change_pct的股票
+        # 筛选达到涨停阈值的股票（按板块分阈值）
         limit_up_stocks = [
             stock for stock in all_stocks
-            if stock.get('change_pct', 0) >= min_change_pct
+            if stock.get('change_pct', 0) >= (
+                min_change_pct if min_change_pct is not None
+                else self._limit_up_threshold(stock.get('code', ''), stock.get('name', ''))
+            )
         ]
+
+        if not limit_up_stocks:
+            print(DEPRECATED_WARNING)
 
         return limit_up_stocks
 
@@ -197,7 +254,7 @@ def main():
     api = KaiLaiAPI()
 
     # 获取今日真正的涨停板股票
-    print("=== 今日涨停板股票（涨幅>=9.9%）===")
+    print("=== 今日涨停板股票（按板块分阈值判定）===")
     limit_up_stocks = api.get_real_limit_up_stocks(
         start_time="0925",
         end_time="0950"
