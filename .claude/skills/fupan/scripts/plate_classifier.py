@@ -30,9 +30,9 @@ CLI
   python3 plate_classifier.py --surge                 # 涨停股+板块绑定
   python3 plate_classifier.py --classify 300835,688603  # 给定代码反查板块
   python3 plate_classifier.py --plate 53427377        # 拆某板块的细分
-  python3 plate_classifier.py --drawdown 20260522     # 大面池
-  python3 plate_classifier.py --attempt 20260522      # 冲板池
-  python3 plate_classifier.py --full 20260522         # 一次性产出全部 JSON
+  python3 plate_classifier.py --drawdown --date 20260522   # 大面池（--drawdown 是开关，日期走 --date）
+  python3 plate_classifier.py --attempt --date 20260522    # 冲板池
+  python3 plate_classifier.py --full --date 20260522       # 一次性产出全部 JSON
 """
 
 import argparse
@@ -141,7 +141,8 @@ def fetch_plates(date=None):
 def fetch_surge_stocks(date=None):
     """
     当日涨停股 + 权威板块归属。
-    返回: [{code, name, change_pct, board_count_desc, plates:[{id,name}], reason, enter_time}]
+    返回: [{code, name, change_pct, board_count_desc, plates:[{id,name}], reason,
+            enter_time, narrative_theme, theme_basis}]
     """
     url = f"{XGB_BASE}/api/surge_stock/stocks"
     params = {"normal": "true", "uplimit": "true"}
@@ -169,6 +170,12 @@ def fetch_surge_stocks(date=None):
             "up_limit": rec.get("up_limit", False),
             "turnover_ratio": rec.get("turnover_ratio", 0.0),
         })
+    # 叙事归并层：--surge 是 /jieli 首板跟风统计的底座，必须带 narrative_theme，
+    # 否则跟风归堆（物理AI/商业航天等）就成了 LLM 自由发挥的口子（保守规则见 narrative_theme()）
+    for rec in out:
+        theme, basis = narrative_theme(rec.get("plates"), rec.get("reason"))
+        rec["narrative_theme"] = theme
+        rec["theme_basis"] = basis
     return out
 
 

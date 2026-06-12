@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 每交易日北京时间 9:26 由 cron 拉起：本机无人值守跑 /jingjia 集合竞价分析，
-# 产物写 ~/claudeCode/jingjia_<date>.md，由 publish_reviews.py（每10分钟 cron）自动发布上线。
+# ⚠️ 2026-06-12 起本脚本已退出自动调度（9:25 自动跑归 OpenClaw cron：daily-jingjia-0925），
+# 保留作【手动补跑工具】：OpenClaw 失败/节假日误判时人工执行一次即可。
+# 产物写 ~/claudeCode/jingjia_<date>.md，写完立即发布（crontab 每10分钟 publish 兜底仍在）。
 # 日志：tail -f /home/ubuntu/fupan/.jingjia_auto.log
 set -u
 
@@ -41,3 +42,5 @@ echo "--- 立即发布 ---"
 /usr/bin/python3 /home/ubuntu/fupan/scripts/publish_reviews.py
 
 echo "===== $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S') 结束 ====="
+# 手动补跑要能看到失败：claude 失败或产物缺失时以非零码退出（不再静默吞掉）
+[ "$CLAUDE_RC" -eq 0 ] && [ -s "$PRODUCT" ] || exit 1

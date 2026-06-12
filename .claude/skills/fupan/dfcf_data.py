@@ -32,7 +32,10 @@ class DFCFData:
             raise ValueError("MX_APIKEY 环境变量未设置")
 
         if not os.path.exists(self.mx_data_script):
-            raise FileNotFoundError(f"mx-data 脚本不存在: {self.mx_data_script}")
+            raise FileNotFoundError(
+                f"mx-data 脚本不存在: {self.mx_data_script}。"
+                "mx-data 是外部 skill（不随仓库携带），本机未安装则本模块全部功能不可用；"
+                "/fupan 主流程不依赖 dfcf_data，可直接降级跳过。")
 
         if not os.path.exists(self.python_bin):
             raise FileNotFoundError(f"Python 解释器不存在: {self.python_bin}")

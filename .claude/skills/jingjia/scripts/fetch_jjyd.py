@@ -63,6 +63,10 @@ D_TURNOVER_MIN = 1.0
 # 跨级决胜：平开 A/B/C 候选竞价换手全部低于该值 = "主力没用力"（同上初定）
 WEAK_TURNOVER = 0.3
 
+# 高开带量容错线（2026-06-12 裁决：高开 7 以上要伴随量，有量就有容错；
+# 取换手分档"0.5~1.5% 真用力"档下限。无量高开 = 诱多排除）。
+GAOKAI_VOL_MIN = 0.5
+
 
 def limit_pct(code):
     """按代码判涨停幅度：科创/创业 20%，北交所 30%（含 920 新段），主板 10%。"""
@@ -186,10 +190,19 @@ def turnover_grade(jjhs):
 def verdict(form_key, ratio, jjhs, cuohe):
     """预判级别（规则层）。板块共振 / 龙头基本面由 LLM 校验后定稿。"""
     tags = []
-    if form_key in ("yizi", "near_limit"):
-        tags.append("⭐参考龙头(排除候选,主线锚点)")
+    if form_key == "yizi":
+        tags.append("⭐参考龙头(一字买不到,主线锚点)")
+    elif form_key == "near_limit":
+        # 高开 7 以上看量：带量+龙头可入候选，无量=诱多（2026-06-12 裁决）
+        if jjhs is not None and jjhs >= GAOKAI_VOL_MIN:
+            tags.append(f"⭐龙头候选(高开带量,换手≥{GAOKAI_VOL_MIN}%,需LLM验龙头身份)")
+        else:
+            tags.append("⚠️高开无量诱多嫌疑(排除,不作锚点)")
     elif form_key == "gaokai":
-        tags.append("⚠️高开诱多嫌疑(排除)")
+        if (jjhs is not None and jjhs >= GAOKAI_VOL_MIN) and (ratio is not None and ratio >= 50):
+            tags.append(f"⚠️高开带量待验(换手≥{GAOKAI_VOL_MIN}%+占比≥50,LLM复核龙头身份)")
+        else:
+            tags.append("⚠️高开诱多嫌疑(排除)")
     elif form_key == "fuzzy":
         tags.append("💤模糊带(占比+共振软判定)")
     elif form_key == "pingkai":
@@ -246,18 +259,21 @@ def fetch(n=15):
         r["turnover_grade"] = turnover_grade(jjhs)
         r["tags"] = verdict(form_key, r.get("ratio"), jjhs, r.get("cuohe"))
         r["hot45"] = bool(r.get("ratio") is not None and r["ratio"] >= 45)
+        # 锚点 = 一字，或高开带量的接近涨停（无量高开价格可疑，不配当主线坐标）
+        r["is_anchor"] = form_key == "yizi" or (
+            form_key == "near_limit" and jjhs is not None and jjhs >= GAOKAI_VOL_MIN)
     return rows
 
 
 def concept_clusters(rows):
-    """概念 token 聚类：token → [(name, form_key)]，只回 ≥2 只的（共振线索）。
+    """概念 token 聚类：token → [(name, is_anchor)]，只回 ≥2 只的（共振线索）。
     原始 concept 字段以 | 或 / 分隔，两种都拆。"""
     m = {}
     for r in rows:
         for tok in str(r.get("concept") or "").replace("|", "/").split("/"):
             tok = tok.strip()
             if tok:
-                m.setdefault(tok, []).append((r["name"], r["form_key"]))
+                m.setdefault(tok, []).append((r["name"], r.get("is_anchor", False)))
     return {k: v for k, v in m.items() if len(v) >= 2}
 
 
@@ -301,26 +317,29 @@ def to_markdown(rows):
     if clusters:
         for tok, members in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
             names = "、".join(
-                f"{nm}{'⭐' if fk in ('yizi', 'near_limit') else ''}" for nm, fk in members)
+                f"{nm}{'⭐' if anc else ''}" for nm, anc in members)
             out.append(f"- **{tok}** ×{len(members)}：{names}")
-        out.append("  （⭐=一字/接近涨停锚点；候选与 ⭐ 同概念 = 板块共振加成）")
+        out.append("  （⭐=一字/高开带量锚点；候选与 ⭐ 同概念 = 板块共振加成）")
     else:
         out.append("- 榜内无 ≥2 只同概念，今日竞价榜板块分散")
 
     # 预筛小结
-    anchors = [r for r in rows if r["form_key"] in ("yizi", "near_limit")]
+    anchors = [r for r in rows if r.get("is_anchor")]
     abc = _tag_has(rows, "A级候选", "B级候选", "C级候选")
     dlevel = _tag_has(rows, "D级换庄候选")
     hot45 = [r for r in rows if r.get("hot45")]
     # 黑名单只收确定性排除项；"待分流/对倒嫌疑"必须留给 LLM 按 SKILL 规则分流，
     # 不许机械判死（曾把"浅水低开·倒货嫌疑(待分流)"误并入黑名单直接拉黑）
-    black = _tag_has(rows, "高开诱多", "拉黑")
+    lead = _tag_has(rows, "龙头候选", "高开带量待验")
+    black = _tag_has(rows, "诱多嫌疑", "拉黑")
     pending = _tag_has(rows, "待分流", "对倒嫌疑")
 
     out.append("")
     out.append("## 脚本预筛小结（规则层；LLM 仅需校验板块共振/龙头基本面后定稿）")
     out.append("- 参考龙头（主线锚点）：" + ("、".join(
         f"{r['name']}({r.get('concept') or '-'})" for r in anchors) if anchors else "无"))
+    out.append("- 高开带量龙头候选（验明龙头身份后可推，理由必须带换手证据）：" + ("、".join(
+        f"{r['name']} {t}" for r, t in lead) if lead else "无"))
     out.append("- A/B/C 级候选：" + ("、".join(
         f"{r['name']} {t} 换手{fmt_pct_plain(r.get('jjhs'))}" for r, t in abc) if abc else "无"))
     out.append("- D 级换庄候选：" + ("、".join(

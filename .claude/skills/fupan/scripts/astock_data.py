@@ -12,8 +12,8 @@ A股短线数据获取引擎 - 基于akshare
 - 错误降级（单源失败不影响整体）
 
 使用方式：
-  python3 astock_data.py --action zt_dt_summary --date 20260429
-  python3 astock_data.py --action full_review --date 20260429
+  python3 astock_data.py --action zt_dt_summary --date <YYYYMMDD>
+  python3 astock_data.py --action full_review --date <YYYYMMDD>
 """
 
 from __future__ import annotations
