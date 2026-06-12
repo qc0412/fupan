@@ -51,6 +51,12 @@ _lhb_lock = threading.Lock()
 _jjyd_lock = threading.Lock()
 _capital_lock = threading.Lock()
 _kpl_lock = threading.Lock()
+# 磁盘写专用锁：LHB/KPL 两条刷新路径各持自己的数据锁进入 _save_to_disk，
+# 共用同一个 .tmp 路径，没有这把锁原子写在并发下不原子
+_disk_lock = threading.Lock()
+# /api/kpl_interval 自选区间查询缓存 {(start,end,series): (ts, payload)}
+_kpl_query_cache = {}
+_kpl_query_lock = threading.Lock()
 
 
 def _mark_cooldown(stamp_key, ttl):
@@ -79,6 +85,11 @@ def _load_from_disk():
 
 def _save_to_disk():
     """把当前缓存写回 data/data.json，使服务器重启后能读到最新数据。"""
+    with _disk_lock:
+        _save_to_disk_locked()
+
+
+def _save_to_disk_locked():
     try:
         tmp = DATA_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -219,7 +230,8 @@ def refresh_kpl_if_stale(force=False):
         if not force and time_mod.time() - _cache["kpl_at"] < ttl and _cache["kpl_interval"]:
             return
         payload = fetch_interval_all()
-        if payload:
+        # payload 是 dict 恒为真，必须看榜单本身是否非空，空榜不许覆盖缓存/落盘
+        if payload and (payload.get("stocks") or payload.get("sectors")):
             _cache["kpl_interval"] = payload
             _cache["kpl_at"] = time_mod.time()
             _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
@@ -272,10 +284,9 @@ def api_data():
     refresh_lhb_if_stale()
     refresh_jjyd_if_stale()
     refresh_capital_if_stale()
-    if not _cache["kpl_interval"]:
-        refresh_kpl_if_stale(force=True)
-    else:
-        refresh_kpl_if_stale()
+    # 不许 force：缓存为空 + 上游持续返回空时，force 会绕过冷却，
+    # 让每个 /api/data 请求都同步打满上游回退探测（前端是轮询的 = 自我放大）
+    refresh_kpl_if_stale()
     return {
         "updated_at": _cache["updated_at"],
         "data": _cache["data"],
@@ -304,15 +315,28 @@ def api_kpl_interval():
     if want_series:
         start_dt = datetime.strptime(start, "%Y-%m-%d").date()
         end_dt = datetime.strptime(end, "%Y-%m-%d").date()
-        if (end_dt - start_dt).days >= MAX_SERIES_DAYS:
+        if (end_dt - start_dt).days > MAX_SERIES_DAYS:
             return jsonify({"error": f"逐日模式区间最长 {MAX_SERIES_DAYS} 个自然日"}), 400
+    # 短 TTL 查询缓存：一次区间查询最多触发几十次上游调用（回退探测/series 逐日），
+    # 无缓存等于把上游请求放大器直接暴露在公网
+    key = (start, end, want_series)
+    ttl = 120 if _is_trading_hours() else 600
+    now = time_mod.time()
+    with _kpl_query_lock:
+        hit = _kpl_query_cache.get(key)
+        if hit and now - hit[0] < ttl:
+            return jsonify(hit[1])
     try:
         payload = fetch_interval_all(start, end)
         if want_series:
             payload["series"] = fetch_interval_series(start, end)
-        return jsonify(payload)
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": f"开盘啦区间榜抓取失败：{type(e).__name__}"}), 502
+    with _kpl_query_lock:
+        _kpl_query_cache[key] = (now, payload)
+        while len(_kpl_query_cache) > 64:  # 防恶意区间枚举撑爆内存
+            _kpl_query_cache.pop(next(iter(_kpl_query_cache)))
+    return jsonify(payload)
 
 
 @app.route("/api/reviews")

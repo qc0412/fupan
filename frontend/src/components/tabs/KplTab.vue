@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { useMarketStore } from '../../stores/market'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useMarketStore, isTradingHours } from '../../stores/market'
 import { fmtYuan, moneyClass } from '../../composables/format'
 
 const store = useMarketStore()
@@ -25,7 +25,7 @@ function daysAgo(n) {
   return iso(d)
 }
 const today = iso(new Date())
-const rangeDays = ref(7)
+const rangeDays = ref(3)
 const startDate = ref(daysAgo(rangeDays.value))
 const endDate = ref(today)
 
@@ -44,7 +44,7 @@ const rangeSpanDays = computed(() => {
   const diff = Math.round((b - a) / 86400000)
   return Number.isFinite(diff) ? diff : 0
 })
-const seriesAllowed = computed(() => rangeSpanDays.value < SERIES_MAX_DAYS)
+const seriesAllowed = computed(() => rangeSpanDays.value <= SERIES_MAX_DAYS)
 
 const stockSortOptions = [
   { key: 'rank_rise', label: '领涨' },
@@ -58,9 +58,14 @@ const sectorSortOptions = [
 const quickRanges = [
   { label: '近3天', days: 3 },
   { label: '近7天', days: 7 },
-  { label: '近14天', days: 14 },
-  { label: '近30天', days: 30 },
+  { label: '近14天', days: 14, extra: true },
+  { label: '近30天', days: 30, extra: true },
 ]
+const showMoreRanges = ref(false)
+// 长区间折叠在「更多」里；已选中的长区间收起后仍保留显示，避免激活态凭空消失
+const visibleQuickRanges = computed(() =>
+  quickRanges.filter(q => !q.extra || showMoreRanges.value || (Number(rangeDays.value) === q.days && endDate.value === today))
+)
 
 function rankValue(row, key) {
   const value = Number(row?.[key])
@@ -108,6 +113,28 @@ function toggleSeries() {
   seriesOn.value = !seriesOn.value
   if (seriesOn.value && !seriesDays.value.length) fetchRange()
 }
+// 首屏 /api/data 捎带的是后端默认区间（近一周），和「近3天」高亮不符时主动拉一次。
+// 判断依据是「上次成功请求的区间」而非返回的 range——后端会把非交易日端点改写成交易日，
+// 拿返回值判断会导致每次切回本 tab 都重复请求。
+onMounted(() => {
+  const r = store.kplRequested
+  if (!r || r.start !== startDate.value || r.end !== endDate.value) fetchRange()
+  scheduleAutoRefresh()
+})
+onUnmounted(() => {
+  clearTimeout(refreshTimer)
+  if (fetchCtrl) fetchCtrl.abort()
+})
+// 自动刷新：store 轮询不再覆盖本 tab 的数据（避免盖掉用户手选区间），
+// 所以盘中的新鲜度由这里自己负责，按当前选中的区间重拉
+let refreshTimer = null
+function scheduleAutoRefresh() {
+  clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => {
+    if (document.visibilityState === 'visible' && !loading.value) fetchRange()
+    scheduleAutoRefresh()
+  }, isTradingHours() ? 60000 : 600000)
+}
 let fetchCtrl = null
 async function fetchRange() {
   // 连点快捷区间/拖滑块时取消上一次在途请求，保证"最新请求胜出"，旧响应不会倒灌覆盖
@@ -116,13 +143,16 @@ async function fetchRange() {
   fetchCtrl = ctrl
   loading.value = true
   error.value = ''
+  const reqStart = startDate.value
+  const reqEnd = endDate.value
   try {
-    const qs = new URLSearchParams({ start: startDate.value, end: endDate.value })
+    const qs = new URLSearchParams({ start: reqStart, end: reqEnd })
     if (seriesOn.value && seriesAllowed.value) qs.set('series', '1')
     const res = await fetch(`/api/kpl_interval?${qs}`, { cache: 'no-store', signal: ctrl.signal })
     const d = await res.json()
     if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`)
     store.kplInterval = d
+    store.kplRequested = { start: reqStart, end: reqEnd }
   } catch (e) {
     if (e.name !== 'AbortError') error.value = String(e.message || e)
   } finally {
@@ -147,19 +177,13 @@ async function fetchRange() {
 
       <div class="kpl-quick-row">
         <button
-          v-for="q in quickRanges"
+          v-for="q in visibleQuickRanges"
           :key="q.days"
           class="filter-btn"
           :class="{ active: Number(rangeDays) === q.days && endDate === today }"
           @click="setQuick(q.days)"
         >{{ q.label }}</button>
-        <button
-          class="filter-btn"
-          :class="{ active: seriesOn }"
-          :disabled="!seriesAllowed"
-          :title="seriesAllowed ? '' : `区间不超过 ${SERIES_MAX_DAYS} 个自然日才能逐日拆解`"
-          @click="toggleSeries"
-        >逐日演变</button>
+        <button class="filter-btn" @click="showMoreRanges = !showMoreRanges">{{ showMoreRanges ? '收起' : '更多 ▾' }}</button>
       </div>
 
       <div class="kpl-slider-row">
@@ -191,6 +215,14 @@ async function fetchRange() {
         <span class="filter-label">排序</span>
         <button v-for="opt in sectorSortOptions" :key="opt.key" class="filter-btn sort-btn" :class="{ active: sectorSort === opt.key }" @click="sectorSort = opt.key">{{ opt.label }}</button>
       </template>
+      <span class="kpl-filter-divider"></span>
+      <button
+        class="filter-btn"
+        :class="{ active: seriesOn }"
+        :disabled="!seriesAllowed"
+        :title="seriesAllowed ? '' : `区间不超过 ${SERIES_MAX_DAYS} 个自然日才能逐日拆解`"
+        @click="toggleSeries"
+      >逐日演变</button>
     </div>
 
     <div v-if="!stocks.length && !sectors.length" class="empty">暂无开盘啦区间榜数据</div>

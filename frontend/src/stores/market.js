@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 
 // 北京时间交易时段判断（容器跑 UTC 也准）
-function isTradingHours() {
+export function isTradingHours() {
   const now = new Date()
   const cn = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
   const day = cn.getDay()
@@ -19,6 +19,7 @@ export const useMarketStore = defineStore('market', {
     topVolume: [],       // 大资金情绪明细
     capitalSignals: {},
     kplInterval: null,
+    kplRequested: null,  // KplTab 最近一次成功请求的 {start,end}（后端会改写返回的 range，不能拿它判断）
     ztPool: [],          // 涨停板
     ztDate: '',
     loading: false,
@@ -39,7 +40,8 @@ export const useMarketStore = defineStore('market', {
         this.jjyd = d.jjyd || []
         this.topVolume = d.top_volume || []
         this.capitalSignals = d.capital_signals || {}
-        this.kplInterval = d.kpl_interval || null
+        // 仅首次兜底注入；之后 KplTab 自管区间，轮询不许把用户选的区间盖回默认值
+        if (!this.kplInterval) this.kplInterval = d.kpl_interval || null
         this.ztPool = d.zt_pool || []
         this.ztDate = d.zt_date || ''
         this.error = ''
