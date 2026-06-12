@@ -4,6 +4,11 @@ import { useMarketStore } from '../../stores/market'
 import { fmtYuan, moneyClass } from '../../composables/format'
 
 const store = useMarketStore()
+const view = ref('stocks') // 个股/板块子视图：数据一次拉取，只拆展示
+const viewOptions = [
+  { key: 'stocks', label: '个股' },
+  { key: 'sectors', label: '板块' },
+]
 const stockSort = ref('rank_rise')
 const sectorSort = ref('rank_strength')
 const loading = ref(false)
@@ -171,21 +176,27 @@ async function fetchRange() {
         <span v-if="payload.source">{{ payload.source }}</span>
         <span v-if="rangeLabel"> · 当前：{{ rangeLabel }}</span>
       </div>
-      <div v-if="stocksMasked" class="data-quality">⚠️ 该区间不含最新交易日，开盘啦把个股数值脱敏了——个股只有排名可信，板块数据不受影响</div>
+      <div v-if="stocksMasked && view === 'stocks'" class="data-quality">⚠️ 该区间不含最新交易日，开盘啦把个股数值脱敏了——个股只有排名可信，板块数据不受影响</div>
       <div v-if="error" class="data-quality">{{ error }}</div>
     </div>
 
     <div class="filters kpl-sort-filters">
-      <span class="filter-label">个股</span>
-      <button v-for="opt in stockSortOptions" :key="opt.key" class="filter-btn sort-btn" :class="{ active: stockSort === opt.key }" @click="stockSort = opt.key">{{ opt.label }}</button>
-      <span class="filter-label sector-label">板块</span>
-      <button v-for="opt in sectorSortOptions" :key="opt.key" class="filter-btn sort-btn" :class="{ active: sectorSort === opt.key }" @click="sectorSort = opt.key">{{ opt.label }}</button>
+      <button v-for="v in viewOptions" :key="v.key" class="filter-btn kpl-view-btn" :class="{ active: view === v.key }" @click="view = v.key">{{ v.label }}</button>
+      <span class="kpl-filter-divider"></span>
+      <template v-if="view === 'stocks'">
+        <span class="filter-label">排序</span>
+        <button v-for="opt in stockSortOptions" :key="opt.key" class="filter-btn sort-btn" :class="{ active: stockSort === opt.key }" @click="stockSort = opt.key">{{ opt.label }}</button>
+      </template>
+      <template v-else>
+        <span class="filter-label">排序</span>
+        <button v-for="opt in sectorSortOptions" :key="opt.key" class="filter-btn sort-btn" :class="{ active: sectorSort === opt.key }" @click="sectorSort = opt.key">{{ opt.label }}</button>
+      </template>
     </div>
 
     <div v-if="!stocks.length && !sectors.length" class="empty">暂无开盘啦区间榜数据</div>
 
     <div v-else class="kpl-grid">
-      <section class="kpl-mobile-summary">
+      <section v-if="view === 'stocks'" class="kpl-mobile-summary">
         <div class="kpl-summary-card">
           <div class="kpl-summary-title">区间领涨</div>
           <div class="kpl-summary-list">
@@ -204,6 +215,8 @@ async function fetchRange() {
             </div>
           </div>
         </div>
+      </section>
+      <section v-else class="kpl-mobile-summary">
         <div class="kpl-summary-card">
           <div class="kpl-summary-title">板块强度</div>
           <div class="kpl-summary-list">
@@ -225,27 +238,31 @@ async function fetchRange() {
       </section>
 
       <section v-if="seriesOn && seriesDays.length" class="kpl-panel">
-        <div class="kpl-panel-head"><div><div class="kpl-panel-title">逐日演变</div><div class="kpl-panel-sub">每个交易日的吸金榜与板块强度榜——历史日个股数值被接口脱敏，只展示排名；板块榜接口只留最近两个交易日</div></div></div>
+        <div class="kpl-panel-head"><div><div class="kpl-panel-title">逐日演变</div><div class="kpl-panel-sub">{{ view === 'stocks' ? '每个交易日的个股吸金榜——历史日个股数值被接口脱敏，只展示排名' : '每个交易日的板块强度榜——板块榜接口只留最近两个交易日' }}</div></div></div>
         <div class="kpl-timeline">
           <div v-for="d in seriesDays" :key="d.date" class="kpl-timeline-day">
-            <div class="kpl-timeline-date">{{ d.date }}<span v-if="d.stocks_masked" class="kpl-masked-tag">仅排名</span></div>
-            <div class="kpl-timeline-row">
+            <div class="kpl-timeline-date">{{ d.date }}<span v-if="view === 'stocks' && d.stocks_masked" class="kpl-masked-tag">仅排名</span></div>
+            <div class="kpl-timeline-row" v-if="view === 'stocks'">
               <span class="kpl-timeline-label">吸金</span>
               <span v-for="(s, i) in d.net_stocks" :key="s.code" class="kpl-chip">
                 #{{ i + 1 }} {{ s.name }}<template v-if="s.net_interval != null"> {{ fmtRawAmount(s.net_interval) }}</template>
               </span>
             </div>
-            <div class="kpl-timeline-row" v-if="d.strength_sectors.length">
+            <div class="kpl-timeline-row" v-if="view === 'sectors' && d.strength_sectors.length">
               <span class="kpl-timeline-label">强度</span>
               <span v-for="s in d.strength_sectors" :key="s.code" class="kpl-chip kpl-chip-sector">
                 {{ s.name }} {{ s.strength ?? '--' }}<template v-if="s.net_interval != null">｜净{{ fmtRawAmount(s.net_interval) }}</template>
               </span>
             </div>
+            <div class="kpl-timeline-row" v-if="view === 'sectors' && !d.strength_sectors.length">
+              <span class="kpl-timeline-label">强度</span>
+              <span class="kpl-chip">—（板块榜仅覆盖最近两个交易日）</span>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="kpl-panel">
+      <section v-if="view === 'stocks'" class="kpl-panel">
         <div class="kpl-panel-head"><div><div class="kpl-panel-title">个股明细</div><div class="kpl-panel-sub">领涨榜 + 吸金榜合并去重，横滑看完整数据；主力净额 = 主力买入 − 主力卖出</div></div></div>
         <div class="kpl-table-wrap">
           <table class="kpl-table">
@@ -271,7 +288,7 @@ async function fetchRange() {
         </div>
       </section>
 
-      <section class="kpl-panel">
+      <section v-else class="kpl-panel">
         <div class="kpl-panel-head"><div><div class="kpl-panel-title">板块明细</div><div class="kpl-panel-sub">强度 / 涨幅 / 净额三榜合并去重</div></div></div>
         <div class="kpl-table-wrap">
           <table class="kpl-table">

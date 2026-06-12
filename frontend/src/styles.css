@@ -207,6 +207,8 @@ tr:hover td { background: var(--elevated); }
 .kpl-range-meta { border-top: 1px solid var(--line-soft); border-bottom: 0; }
 .kpl-sort-filters { border-bottom: 1px solid var(--line-soft); }
 .kpl-sort-filters .sector-label { margin-left: 10px; }
+.kpl-view-btn { font-weight: 600; min-width: 56px; }
+.kpl-filter-divider { width: 1px; height: 18px; background: var(--line); margin: 0 6px; align-self: center; }
 .kpl-grid { display: grid; grid-template-columns: 1fr; gap: 14px; padding: 14px; }
 .kpl-mobile-summary { display: none; gap: 10px; }
 .kpl-summary-card { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: 12px; padding: 12px; }
