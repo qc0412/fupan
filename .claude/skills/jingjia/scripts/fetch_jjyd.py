@@ -34,19 +34,13 @@ from datetime import datetime, timezone, timedelta
 
 
 def _locate_fupan_dir():
-    """自动定位含 scraper.py 的 fupan 目录。优先级：FUPAN_DIR > 常见位置。"""
-    candidates = []
+    """定位含 scraper.py 的 fupan 仓库根。
+    本文件就在 <repo>/.claude/skills/jingjia/scripts/ 下，相对 __file__ 上溯即可
+    （realpath 兼容经 ~/.claude/skills symlink 调用）；FUPAN_DIR 环境变量可覆盖。"""
     env = os.environ.get("FUPAN_DIR")
-    if env:
-        candidates.append(env)
-    home = os.path.expanduser("~")
-    candidates += [
-        os.path.join(home, "fupan"),
-        os.path.join(home, "claudeCode", "fupan"),
-        os.path.join(home, "claudecode", "fupan"),
-        os.path.join(home, "Documents", "claudeCode", "fupan"),
-    ]
-    for d in candidates:
+    repo = os.path.realpath(os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", ".."))
+    for d in (env, repo):
         if d and os.path.isfile(os.path.join(d, "scraper.py")):
             return d
     raise RuntimeError(
@@ -71,11 +65,11 @@ WEAK_TURNOVER = 0.3
 
 
 def limit_pct(code):
-    """按代码判涨停幅度：科创/创业 20%，北交所 30%，主板 10%。"""
+    """按代码判涨停幅度：科创/创业 20%，北交所 30%（含 920 新段），主板 10%。"""
     c = str(code)
     if c.startswith(("30", "68")):
         return 20.0
-    if c.startswith(("8", "4")):
+    if c.startswith(("8", "4", "92")):
         return 30.0
     return 10.0
 
@@ -318,7 +312,10 @@ def to_markdown(rows):
     abc = _tag_has(rows, "A级候选", "B级候选", "C级候选")
     dlevel = _tag_has(rows, "D级换庄候选")
     hot45 = [r for r in rows if r.get("hot45")]
-    black = _tag_has(rows, "高开诱多", "倒货嫌疑", "拉黑", "对倒嫌疑")
+    # 黑名单只收确定性排除项；"待分流/对倒嫌疑"必须留给 LLM 按 SKILL 规则分流，
+    # 不许机械判死（曾把"浅水低开·倒货嫌疑(待分流)"误并入黑名单直接拉黑）
+    black = _tag_has(rows, "高开诱多", "拉黑")
+    pending = _tag_has(rows, "待分流", "对倒嫌疑")
 
     out.append("")
     out.append("## 脚本预筛小结（规则层；LLM 仅需校验板块共振/龙头基本面后定稿）")
@@ -332,6 +329,8 @@ def to_markdown(rows):
         f"{r['name']}({fmt_ratio(r.get('ratio'))})" for r in hot45) if hot45 else "无"))
     out.append("- 黑名单建议：" + ("、".join(
         f"{r['name']}({t})" for r, t in black) if black else "无"))
+    out.append("- 待分流（LLM 按 SKILL 分流规则定夺，禁止直接拉黑）：" + ("、".join(
+        f"{r['name']}({t})" for r, t in pending) if pending else "无"))
 
     abc_all_weak = abc and all((_f(r.get("jjhs")) or 0) < WEAK_TURNOVER for r, _ in abc)
     if abc_all_weak and dlevel:

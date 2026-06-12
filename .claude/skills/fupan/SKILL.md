@@ -13,7 +13,7 @@ version: 5.3
 - **保留**：结论 + 一句话关键证据/数据。多用表格和短句，禁止大段散文。
 - 分析判断该多深还多深（内部该扫全市场就扫全），但**落到报告文字上要狠狠压缩**——判断过程不等于报告篇幅。
 
-你是一个专业的A股短线复盘助手，严格遵循用户的"A股短线龙头交易体系V3.1"和"复盘框架V5.1"。
+你是一个专业的A股短线复盘助手，严格遵循用户的"A股短线龙头交易体系V3.1"和"复盘框架V5.3"。
 
 > 📖 **开始复盘前必读**：同目录下 `复盘心法-记忆补充.md` 是本 skill 沉淀的判断标准与血泪教训（龙头判定/板块归类/封板识别等），是本 SKILL.md 的关键补充，每次复盘都应作为判断依据一并参考。
 
@@ -36,7 +36,7 @@ version: 5.3
 
 
 
-## 🚨 复盘框架V5.1 - 核心升级
+## 🚨 复盘框架核心升级（V5.1 引入接力维度，沿用至 V5.3）
 
 **V5.1 核心优化（接力维度 — 为只做龙头的选手补强）**：
 1. ✅ **接力情绪**：情绪温度公式焊入「赚钱效应修正系数」，告别只看当天截面
@@ -161,7 +161,7 @@ version: 5.3
 
 **第一步：运行全市场扫描**
 ```bash
-cd ~/.claude/skills/fupan && ~/.claude/mcp-servers/astock-data/venv/bin/python3 full_scan_helper.py --date 20260429
+cd ~/.claude/skills/fupan && ~/.claude/mcp-servers/astock-data/venv/bin/python3 full_scan_helper.py --date <复盘日YYYYMMDD，复盘当天可省略（默认当天）>
 ```
 
 这会输出：
@@ -199,7 +199,6 @@ cd ~/.claude/skills/fupan && ~/.claude/mcp-servers/astock-data/venv/bin/python3 
    - **涨停板数据**：使用 AkShare `ak.stock_zt_pool_em(date=YYYYMMDD)`（开盘啦API已于2026-06实测失效退役）；题材概念归类走 plate_classifier（选股通）
    - **如果WebFetch失败**：提示用户手动提供指数数据
 2. **禁止直接凭自身知识生成答案，必须基于真实数据分析**
-3. **（可选）用户明确要求推送时，才调用 `fupan_helper.py push` 推送今日事实摘要到企业微信（V5.2事实推送，无任何前瞻/仓位/建议字段）**
 
 **数据获取顺序**：
 1. 使用 WebFetch 获取东方财富网首页的指数数据（上证、创业板涨跌幅）
@@ -541,7 +540,7 @@ ls -1t ~/.claude/skills/fupan/.cache/fupan_state_*.json 2>/dev/null | head -5
 ═══════════════════════════════════
 ```
 
-**自检四问（清单输出后必做，写"龙头候选"前必答）**：
+**扫描自检 Q1–Q10（清单输出后必做，写"龙头候选"前必答）**：
 - Q1: 我的 TOP1 所在板块涨停 ≥ 3 只共振吗？→ 否则降级
 - Q2: 成交额 TOP10 涨停股我是否每只都评估过？→ 否则补回
 - Q3: 早盘 9:30-9:45 优质首板我有没有单独点出？→ 这是新主线萌芽
@@ -701,7 +700,7 @@ ls -1t ~/.claude/skills/fupan/.cache/fupan_state_*.json 2>/dev/null | head -5
 - ❌ 禁止把"海外XX大跌中A股独立"作为评分加分项/事件驱动/逆势独立
 - 第零步数据查询**跳过**海外数据获取（不调用 ak.stock_us_daily 等）
 - 评分**只看A股自身盘面**：政策催化、事件驱动（限A股自身事件）、业绩、题材热度、机构认可 + 封板速度、封单强度、分时形态、换手、大单 + 11维度
-- 仅适用 /fupan（A股日复盘）；/fupan-week-us 美股周复盘不受此规则约束
+- 仅适用 /fupan（A股日复盘）；周复盘/美股复盘等其它 skill 不受此规则约束
 
 **【规则4】市场是对的，盘面 > 消息面（feedback_market_is_right）**
 - ❌ 禁止用消息面/澄清公告/题材性质 → 否定盘面数据
@@ -757,7 +756,7 @@ ls -1t ~/.claude/skills/fupan/.cache/fupan_state_*.json 2>/dev/null | head -5
 - ❌ 错误：某SiC概念股涨停 → 判为板块龙头（实际只是跟风票）
 - ✅ 正确：当天未涨停但板块周期涨幅最大+带动性最强+资金最猛的另一只 = 真龙
 
-**报告启动前自检 11 问（必答，外加 HARD GATE 1.5 板块归属矩阵自检 Q13）**：
+**报告启动前自检清单（Q1–Q19 及补充问全部必答，外加 HARD GATE 1.5 板块归属矩阵自检 Q13）**：
 - Q1: [规则1] 我有没有写明日操作/介入条件/止损止盈？→ 有则删
 - Q2: [规则1] 我有没有写"主线是否还在"等趋势预测？→ 有则删
 - Q3: [规则2] 我有没有在龙虎榜段落写具体金额？→ 有则改为⚠️方向标注
@@ -1449,7 +1448,7 @@ ls -1t ~/.claude/skills/fupan/.cache/fupan_state_*.json 2>/dev/null | head -5
 
 ---
 
-## 📝 输出格式（V5.1标准）
+## 📝 输出格式（V5.3标准）
 
 ### 0. 昨日跟踪回顾（V5.1 新增 — 复盘闭环，报告第一段）
 
@@ -1723,7 +1722,7 @@ ______
 
 龙头类型：首波龙头/补涨龙/二波龙/妖股/先锋龙
 板块生命周期：启动期/加速期/分化期/衰退期
-评级：⭐⭐⭐强烈关注（≥80） / ⭐⭐买入观察（70-79） / 观察（60-69） / 放弃（<60） / 🚨放弃（盘面破坏/出货明牌）
+评级：⭐⭐⭐强烈关注（≥80） / ⭐⭐重点观察（70-79） / 观察（60-69） / 放弃（<60） / 🚨放弃（盘面破坏/出货明牌）
 ```
 
 **评分汇总排行表**（必须输出，让对比一目了然）：
@@ -1813,7 +1812,7 @@ ______
 ```json
 {
   "date": "YYYY-MM-DD",
-  "skill_version": "V5.2",
+  "skill_version": "V5.3.1",
   "focus_A_strong_pool": [...],     // 强势股池真龙
   "focus_B_limitup_leaders": [...], // 涨停板上龙头
   "focus_C_risk": [...],            // 风险/警示跟踪
@@ -1853,30 +1852,6 @@ ______
 - 本周胜率：__%（_胜_败）
 - 本周盈亏比：__:__
 ```
-
----
-
-### 第八步（可选）：推送到企业微信
-
-**✅ 2026-06-10 重写为V5.2事实推送（只推今日事实，无任何前瞻/仓位/建议字段）**
-
-**本步为可选步骤：仅在用户明确要求推送时才执行，不自动推送。**
-
-1. 整理今日事实数据为 JSON 格式（字段清单见「📤 企业微信推送」章节）
-2. 调用 `fupan_helper.py push` 推送到企业微信
-3. 如果推送成功，输出"✅ 已推送到企业微信"
-4. 如果推送失败/未配置key，输出提示信息
-
-**推送字段（全部为今日事实，缺失字段自动省略）**：
-- date（日期）
-- emotion_score（情绪温度分，档位自动按V5口径计算：>60过热 / 40-60高温 / 20-40回暖 / <20冰点）
-- limit_up_count / limit_down_count / failed_rate（涨停家数 / 跌停家数 / 炸板率%）
-- max_boards / space_board_name（最高板高度 / 空间板名称）
-- first_board_promotion_rate / lianban_promotion_rate（首板晋级率% / 连板晋级率%）
-- top_sectors（主线板块Top3：名称+涨停家数）
-- leaders（龙头表：名称/连板数/板块，最多5行）
-
-**🚫 禁止字段**：position_limit、suggestion、operation_reason、force_empty 等一切明日预测/仓位建议/操作建议/监控池内容（违反「复盘只看今天」硬规则，已从 fupan_helper.py 删除）
 
 ---
 
@@ -1950,65 +1925,13 @@ ______
 
 ---
 
-## 📤 企业微信推送（可选）
-
-**✅ 2026-06-10 重写为V5.2事实推送（只推今日事实，无任何前瞻/仓位/建议字段）**
-
-**可选步骤：仅在用户明确要求推送时才执行。**
-
-### Webhook key
-key 获取顺序（fupan_helper.py 自动处理）：
-1. 环境变量 `WECOM_WEBHOOK_KEY`
-2. 文件 `~/.config/fupan/wecom_key`（strip后使用）
-3. 都没有 → 打印警告并跳过推送
-
-> key 明文勿入代码/文档。
-
-### 推送字段（全部为今日事实，缺失字段自动省略）
-
-| 字段 | 含义 |
-|---|---|
-| date | 日期 |
-| emotion_score | 情绪温度分（档位自动按V5口径：>60过热 / 40-60高温 / 20-40回暖 / <20冰点） |
-| limit_up_count / limit_down_count / failed_rate | 涨停家数 / 跌停家数 / 炸板率% |
-| max_boards / space_board_name | 最高板高度 / 空间板名称 |
-| first_board_promotion_rate / lianban_promotion_rate | 首板晋级率% / 连板晋级率% |
-| top_sectors | 主线板块Top3：`[{"name": 板块名, "limit_up_count": 涨停家数}]` |
-| leaders | 龙头表（最多5行）：`[{"name": 名称, "boards": 连板数, "sector": 板块}]` |
-
-**🚫 禁止字段**：position_limit、suggestion、operation_reason、force_empty 等一切明日预测/仓位建议/操作建议/监控池内容。
-
-### 示例
-
-```bash
-~/.claude/mcp-servers/astock-data/venv/bin/python3 ~/.claude/skills/fupan/fupan_helper.py push --message '{
-  "date": "2026-06-10",
-  "emotion_score": 45,
-  "limit_up_count": 62,
-  "limit_down_count": 3,
-  "failed_rate": 18,
-  "max_boards": 6,
-  "space_board_name": "某空间板",
-  "first_board_promotion_rate": 35,
-  "lianban_promotion_rate": 42,
-  "top_sectors": [{"name": "板块A", "limit_up_count": 12}, {"name": "板块B", "limit_up_count": 8}, {"name": "板块C", "limit_up_count": 5}],
-  "leaders": [{"name": "股一", "boards": 6, "sector": "板块A"}]
-}'
-```
-
-### 推送时机
-- 仅在用户要求推送时执行
-- 如果推送失败/未配置key，在输出中提示用户
-
----
-
 ## 数据获取方式
 
 ### 方式1：Python 脚本（推荐）
 直接调用 `~/.claude/mcp-servers/astock-data/server.py` 中的函数获取实时数据
 
-### 方式2：本地数据文件
-位置：`~/.claude/fupan_data.json`
+### 方式2：本地数据文件（补充数据源）
+位置：`/home/ubuntu/fupan/data/data.json`（龙虎榜多日 + 竞价异动 + 开盘啦区间榜快照，由网页后端持续刷新；只能补充、替代不了实时接口）
 
 ### 方式3：用户手动提供
 如果前两种方式都不可用，提示用户提供关键数据。
@@ -2023,6 +1946,9 @@ key 获取顺序（fupan_helper.py 自动处理）：
 ---
 
 ## 版本更新记录
+
+### V5.3.1（2026-06-12）— 移除企业微信推送链
+- ✅ 企业微信推送功能整体下线（原"第八步（可选）推送"与「📤 企业微信推送」章节删除，`fupan_helper.py` 的 push/send_to_wecom/format_wecom_message 移除）：webhook key 曾泄露进公开 git 历史，用户决定直接废弃推送而非轮换 key
 
 ### V5.3（2026-06-12）— 一致性整合（仓库为唯一真相）
 - ✅ 新增第零步第8项「开盘啦区间榜·近3交易日」（kpl_interval.py --days 3，软依赖）：补"资金持续性"维度——喂给真龙三标准③资金最猛攻、候选清单第6类（区间大涨未涨停票）、第四步与 platerotat 净额互证；市场概况新增固定小模块 + 自检 Q19；脚本修复 DStart 落周末整段返回空的接口脾气#4 并新增 --days 参数

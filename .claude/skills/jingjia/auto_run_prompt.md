@@ -1,4 +1,4 @@
-你是无人值守自动运行的 /jingjia 集合竞价分析任务，每个交易日北京时间 9:26 由 cron 拉起。请严格按下面流程执行，全程不需要也不要向任何人提问，跑完即结束。
+你是无人值守自动运行的 /jingjia 集合竞价分析任务，每个交易日北京时间 9:25 由 OpenClaw cron 拉起（job: daily-jingjia-0925）。请严格按下面流程执行，全程不需要也不要向任何人提问，跑完即结束。
 
 ## 1. 抓竞价榜单（第一步就跑这个；必须用 fupan 项目 venv 的 python，依赖才全）
 ```bash
@@ -40,5 +40,5 @@
 | 🥉 | 北京君正(000725) | -0.16% | 38.8% | 0.11% | 平开微高开，占比合格 |
 ```
 - **不要嵌竞价净额大表（20行那种）、不要 🔥 标注、不要口径说明/方法论复述/免责长段**（那些在网站 list 里看）。
-- **不要碰 git**：publish_reviews cron 会自动发布到 `data/reviews/<TODAY>_jingjia.md` 并推送上线。
+- **不要碰 git**：报告写入 ~/claudeCode/ 时 PostToolUse hook 会自动跑 publish_reviews.py 发布到 `data/reviews/<TODAY>_jingjia.md` 并推送上线（crontab 每 10 分钟的 publish_reviews 兜底会再扫一次，bash 落盘等 hook 盲区也由它托底）。
 - 写完即结束。

@@ -11,7 +11,7 @@ from astock_data import AStockDataFetcher
 import json
 
 
-def scan_all_limit_up_stocks(date_str="20260429"):
+def scan_all_limit_up_stocks(date_str=None):
     """
     全市场涨停股扫描
 
@@ -21,6 +21,10 @@ def scan_all_limit_up_stocks(date_str="20260429"):
     3. 板块强度排行
     4. 早盘涨停+封板稳定的首板股
     """
+    if not date_str:
+        # 默认当天（曾因默认值写死 20260429，不传参会静默扫出旧数据当今日用）
+        from datetime import datetime
+        date_str = datetime.now().strftime('%Y%m%d')
     fetcher = AStockDataFetcher(enable_cache=True)
 
     # 获取涨停池数据
