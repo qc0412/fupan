@@ -63,14 +63,14 @@ const conceptHtml = (c) => escapeHtml(String(c || '')).replace(/\|/g, '<br>')
             <div v-if="!isNaN(Number(s.jjzf))" class="pct-jj">竞{{ Number(s.jjzf) > 0 ? '+' : '' }}{{ s.jjzf }}%</div>
             <div :class="moneyClass(s.zf)">{{ Number(s.zf) > 0 ? '+' : '' }}{{ s.zf }}%</div>
           </td>
-          <td><span :class="moneyClass(s.zhuli)" style="font-weight:600">{{ s.zhuli ? fmtWanUnit(s.zhuli) : '--' }}</span></td>
+          <td><span :class="moneyClass(s.zhuli)" style="font-weight:600">{{ s.zhuli != null ? fmtWanUnit(s.zhuli) : '--' }}</span></td>
           <td>{{ fmtWanUnit(s.jje) }}</td>
           <td class="ratio-cell">
             <span v-if="s.ratio != null" :class="{ 'ratio-hot': s.ratio >= HOT }">{{ s.ratio.toFixed(1) }}%</span>
             <span v-else>--</span>
           </td>
-          <td>{{ Number(s.jjhs) }}%</td>
-          <td class="col-ltsz">{{ Number(s.ltsz).toFixed(0) }}亿</td>
+          <td>{{ Number.isFinite(Number(s.jjhs)) ? Number(s.jjhs) + '%' : '--' }}</td>
+          <td class="col-ltsz">{{ Number.isFinite(Number(s.ltsz)) ? Number(s.ltsz).toFixed(0) + '亿' : '--' }}</td>
           <td><div class="concept" v-html="conceptHtml(s.concept)"></div></td>
         </tr>
       </tbody>

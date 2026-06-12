@@ -109,6 +109,12 @@ function onSlider() {
   startDate.value = daysAgo(Number(rangeDays.value))
   endDate.value = today
 }
+// 手输日期：同步 rangeDays（快捷按钮激活态才不说谎）并立即请求，不用再点刷新
+function onManualDate() {
+  const span = Math.round((new Date(endDate.value) - new Date(startDate.value)) / 86400000)
+  if (Number.isFinite(span) && span >= 0) rangeDays.value = span
+  fetchRange()
+}
 function toggleSeries() {
   seriesOn.value = !seriesOn.value
   if (seriesOn.value && !seriesDays.value.length) fetchRange()
@@ -149,8 +155,10 @@ async function fetchRange() {
     const qs = new URLSearchParams({ start: reqStart, end: reqEnd })
     if (seriesOn.value && seriesAllowed.value) qs.set('series', '1')
     const res = await fetch(`/api/kpl_interval?${qs}`, { cache: 'no-store', signal: ctrl.signal })
-    const d = await res.json()
-    if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`)
+    let d = null
+    try { d = await res.json() } catch { /* 网关 502/504 返回的是 HTML，不是 JSON */ }
+    if (!res.ok) throw new Error((d && d.error) || `HTTP ${res.status}（上游慢或网关超时，稍后重试）`)
+    if (!d) throw new Error('响应不是有效 JSON')
     store.kplInterval = d
     store.kplRequested = { start: reqStart, end: reqEnd }
   } catch (e) {
@@ -192,8 +200,8 @@ async function fetchRange() {
       </div>
 
       <div class="kpl-date-row">
-        <label>开始 <input v-model="startDate" type="date" /></label>
-        <label>结束 <input v-model="endDate" type="date" /></label>
+        <label>开始 <input v-model="startDate" type="date" @change="onManualDate" /></label>
+        <label>结束 <input v-model="endDate" type="date" @change="onManualDate" /></label>
       </div>
 
       <div class="dates kpl-range-meta">
