@@ -1,19 +1,25 @@
 import os
 import re
 import json
+import logging
 import threading
 import time as time_mod
 import atexit
 from datetime import datetime, time as dtime, timezone, timedelta
-from flask import Flask, abort
+from flask import Flask, abort, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from scraper import (
     fetch_multi_day_lhb,
     get_jjyd, parse_jjyd,
     get_top_volume, parse_top_volume, compute_capital_signals,
 )
+from kpl_api import MAX_SERIES_DAYS, fetch_interval_all, fetch_interval_series
 
 CN_TZ = timezone(timedelta(hours=8))
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("fupan.app")
 
 
 def _now_cn():
@@ -38,10 +44,18 @@ _cache = {
     "top_volume": [],
     "capital_signals": {},
     "capital_at": 0.0,
+    "kpl_interval": {},
+    "kpl_at": 0.0,
 }
 _lhb_lock = threading.Lock()
 _jjyd_lock = threading.Lock()
 _capital_lock = threading.Lock()
+_kpl_lock = threading.Lock()
+
+
+def _mark_cooldown(stamp_key, ttl):
+    """抓取失败后把时间戳回拨半个 TTL：冷却 ttl/2 秒再试，避免每次请求都打远端。"""
+    _cache[stamp_key] = time_mod.time() - ttl / 2
 
 
 def _load_from_disk():
@@ -55,9 +69,11 @@ def _load_from_disk():
         _cache["jjyd"] = d.get("jjyd", [])
         _cache["top_volume"] = d.get("top_volume", [])
         _cache["capital_signals"] = d.get("capital_signals", {})
+        _cache["kpl_interval"] = d.get("kpl_interval", {})
         _cache["updated_at"] = d.get("updated_at", "")
         return bool(_cache["data"])
     except Exception:
+        log.exception("读取 %s 失败，按无本地数据处理", DATA_FILE)
         return False
 
 
@@ -73,10 +89,11 @@ def _save_to_disk():
                 "jjyd": _cache["jjyd"],
                 "top_volume": _cache["top_volume"],
                 "capital_signals": _cache["capital_signals"],
+                "kpl_interval": _cache["kpl_interval"],
             }, f, ensure_ascii=False)
         os.replace(tmp, DATA_FILE)
     except Exception:
-        pass
+        log.exception("写回 %s 失败（内存缓存不受影响）", DATA_FILE)
 
 
 def _lhb_ttl():
@@ -115,10 +132,12 @@ def refresh_lhb(force=False):
             _save_to_disk()
             return True
         # 抓取失败：保留旧数据，冷却 ttl/2 秒后再试
-        _cache["lhb_at"] = time_mod.time() - ttl + ttl / 2
+        log.warning("龙虎榜抓取返回空，保留旧数据并冷却重试")
+        _mark_cooldown("lhb_at", ttl)
         return False
     except Exception:
-        _cache["lhb_at"] = time_mod.time() - ttl + ttl / 2
+        log.exception("龙虎榜抓取异常，保留旧数据并冷却重试")
+        _mark_cooldown("lhb_at", ttl)
         return False
     finally:
         _lhb_lock.release()
@@ -156,9 +175,11 @@ def refresh_jjyd_if_stale():
             _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
         else:
             # 抓取失败：冷却 ttl/2 秒后再试，保留旧缓存
-            _cache["jjyd_at"] = time_mod.time() - ttl + ttl / 2
+            log.warning("竞价净额抓取返回空，冷却重试")
+            _mark_cooldown("jjyd_at", ttl)
     except Exception:
-        _cache["jjyd_at"] = time_mod.time() - ttl + ttl / 2
+        log.exception("竞价净额抓取异常，冷却重试")
+        _mark_cooldown("jjyd_at", ttl)
     finally:
         _jjyd_lock.release()
 
@@ -179,12 +200,38 @@ def refresh_capital_if_stale():
             _cache["capital_at"] = time_mod.time()
             _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
         else:
-            # 抓取失败：冷却 ttl/2 秒后再试，避免每次请求都重复打远端
-            _cache["capital_at"] = time_mod.time() - ttl + ttl / 2
+            log.warning("成交额榜抓取返回空，冷却重试")
+            _mark_cooldown("capital_at", ttl)
     except Exception:
-        _cache["capital_at"] = time_mod.time() - ttl + ttl / 2
+        log.exception("成交额榜抓取异常，冷却重试")
+        _mark_cooldown("capital_at", ttl)
     finally:
         _capital_lock.release()
+
+
+def refresh_kpl_if_stale(force=False):
+    ttl = 600 if _is_trading_hours() else 3600
+    if not force and time_mod.time() - _cache["kpl_at"] < ttl and _cache["kpl_interval"]:
+        return
+    if not _kpl_lock.acquire(blocking=False):
+        return
+    try:
+        if not force and time_mod.time() - _cache["kpl_at"] < ttl and _cache["kpl_interval"]:
+            return
+        payload = fetch_interval_all()
+        if payload:
+            _cache["kpl_interval"] = payload
+            _cache["kpl_at"] = time_mod.time()
+            _cache["updated_at"] = _now_cn().strftime("%Y-%m-%d %H:%M:%S")
+            _save_to_disk()
+        else:
+            log.warning("开盘啦区间榜抓取返回空，冷却重试")
+            _mark_cooldown("kpl_at", ttl)
+    except Exception:
+        log.exception("开盘啦区间榜抓取异常，冷却重试")
+        _mark_cooldown("kpl_at", ttl)
+    finally:
+        _kpl_lock.release()
 
 
 if not _load_from_disk():
@@ -193,6 +240,7 @@ if not _load_from_disk():
     threading.Thread(target=refresh_lhb, kwargs={"force": True}, daemon=True).start()
 threading.Thread(target=refresh_jjyd_if_stale, daemon=True).start()
 threading.Thread(target=refresh_capital_if_stale, daemon=True).start()
+threading.Thread(target=refresh_kpl_if_stale, daemon=True).start()
 
 scheduler = BackgroundScheduler(timezone=CN_TZ)
 scheduler.add_job(lambda: refresh_lhb(force=True), "cron",
@@ -201,12 +249,33 @@ scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
 
 
+def _validate_kpl_range(start, end):
+    if not start or not end:
+        return None, None, "缺少 start 或 end 参数"
+    if not _DATE_RE.match(start) or not _DATE_RE.match(end):
+        return None, None, "日期格式必须是 YYYY-MM-DD"
+    try:
+        start_dt = datetime.strptime(start, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(end, "%Y-%m-%d").date()
+    except ValueError:
+        return None, None, "日期不是有效日历日期"
+    if start_dt > end_dt:
+        return None, None, "start 不能晚于 end"
+    if (end_dt - start_dt).days > 60:
+        return None, None, "区间最长支持 60 天"
+    return start, end, None
+
+
 @app.route("/api/data")
 def api_data():
     """前端 SPA 数据接口：触发 TTL 刷新后返回全部四块数据。"""
     refresh_lhb_if_stale()
     refresh_jjyd_if_stale()
     refresh_capital_if_stale()
+    if not _cache["kpl_interval"]:
+        refresh_kpl_if_stale(force=True)
+    else:
+        refresh_kpl_if_stale()
     return {
         "updated_at": _cache["updated_at"],
         "data": _cache["data"],
@@ -214,7 +283,36 @@ def api_data():
         "jjyd": _cache["jjyd"],
         "top_volume": _cache["top_volume"],
         "capital_signals": _cache["capital_signals"],
+        "kpl_interval": _cache["kpl_interval"],
     }
+
+
+@app.route("/api/kpl_interval")
+def api_kpl_interval():
+    """开盘啦区间榜：支持前端自选 start/end，不污染默认 /api/data 缓存。
+
+    series=1 时附带逐日时间轴（每个交易日的吸金榜+板块强度榜，
+    区间限 MAX_SERIES_DAYS 个自然日；历史日个股数值被接口脱敏，仅排名可信）。
+    """
+    start, end, err = _validate_kpl_range(
+        request.args.get("start", ""),
+        request.args.get("end", ""),
+    )
+    if err:
+        return jsonify({"error": err}), 400
+    want_series = request.args.get("series") == "1"
+    if want_series:
+        start_dt = datetime.strptime(start, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(end, "%Y-%m-%d").date()
+        if (end_dt - start_dt).days >= MAX_SERIES_DAYS:
+            return jsonify({"error": f"逐日模式区间最长 {MAX_SERIES_DAYS} 个自然日"}), 400
+    try:
+        payload = fetch_interval_all(start, end)
+        if want_series:
+            payload["series"] = fetch_interval_series(start, end)
+        return jsonify(payload)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"开盘啦区间榜抓取失败：{type(e).__name__}"}), 502
 
 
 @app.route("/api/reviews")
@@ -281,6 +379,7 @@ def healthz():
         "lhb": len(_cache["data"]),
         "jjyd": len(_cache["jjyd"]),
         "top_volume": len(_cache["top_volume"]),
+        "kpl_interval": len((_cache.get("kpl_interval") or {}).get("stocks", [])),
     }
 
 

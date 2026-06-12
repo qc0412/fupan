@@ -181,6 +181,22 @@ def _fc(x):
     return "?" if x is None else str(x)
 
 
+def _stock_name(s):
+    return s.get("name") or s.get("名称") or s.get("股票") or ""
+
+
+def _stock_code(s):
+    return s.get("code") or s.get("代码") or s.get("symbol") or ""
+
+
+def _stock_evidence(s):
+    return s.get("核心证据") or s.get("一句话证据") or s.get("证据") or ""
+
+
+def _stock_amount(s):
+    return s.get("成交") if s.get("成交") is not None else s.get("成交额")
+
+
 def render_jieli(pool):
     date = pool.get("date", "")
     mk = pool.get("market", {}) or {}
@@ -222,7 +238,7 @@ def render_jieli(pool):
             "s": s,
             "height": height,
             "lb": lb, "sb": sb, "tot": tot,
-            "amt": _amount(s.get("成交")),
+            "amt": _amount(_stock_amount(s)),
             "sector": sector,
             "theme": theme,
             # 板块内地位/归堆按"主线"（短线叙事归并）优先，无主线回退权威板块
@@ -258,7 +274,8 @@ def render_jieli(pool):
             if isinstance(std, dict) and std.get("明细"):
                 evid = std["明细"]
             else:
-                bits = [b for b in (s.get("成交"), s.get("炸板次数") is not None and f"炸板{s['炸板次数']}次") if b]
+                fallback_evid = _stock_evidence(s)
+                bits = [b for b in (fallback_evid, _stock_amount(s), s.get("炸板次数") is not None and f"炸板{s['炸板次数']}次") if b]
                 evid = " ｜ ".join(str(b) for b in bits)
             flw = f"{_fc(it['lb'])}/{_fc(it['sb'])}/{_fc(it['tot'])}"
             # 权威板块 + 主线归并（主线与权威板块不同才追加，避免冗余）
@@ -266,7 +283,7 @@ def render_jieli(pool):
             if it["theme"] and it["theme"] != it["sector"]:
                 sector_disp = f"{it['sector']}›{it['theme']}"
             lines.append(
-                f"| {_cell(s.get('name',''))}({_cell(s.get('code',''))}) "
+                f"| {_cell(_stock_name(s))}({_cell(_stock_code(s))}) "
                 f"| {_cell(s.get('连板数',''))} | {_cell(sector_disp)} "
                 f"| {_cell(_status(it))} | {flw} "
                 f"| {_cell(s.get('龙头判定',''))} | {_cell(evid)} |"
@@ -306,7 +323,7 @@ def render_jieli(pool):
                 concl = "弱共振·龙头待确认"
             flw = f"{_fc(leader['lb'])}/{_fc(leader['sb'])}/{_fc(leader['tot'])}"
             lines.append(
-                f"| {_cell(sec)} | {_cell(ls.get('name',''))}({_cell(ls.get('code',''))}) "
+                f"| {_cell(sec)} | {_cell(_stock_name(ls))}({_cell(_stock_code(ls))}) "
                 f"| {leader['height']}板 | {flw} | {_cell(concl)} |"
             )
         lines.append("")

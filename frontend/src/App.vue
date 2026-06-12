@@ -5,11 +5,13 @@ import { useMarketStore } from './stores/market'
 import LhbTab from './components/tabs/LhbTab.vue'
 import JjydTab from './components/tabs/JjydTab.vue'
 import CapitalTab from './components/tabs/CapitalTab.vue'
+import KplTab from './components/tabs/KplTab.vue'
 import ReviewTab from './components/tabs/ReviewTab.vue'
 import { pickTraderQuote } from './traderQuotes'
 
 const tabs = [
   { key: 'capital', label: '大资金情绪', comp: CapitalTab },
+  { key: 'kpl', label: '开盘啦区间榜', comp: KplTab },
   { key: 'lhb', label: '多次上榜', comp: LhbTab },
   { key: 'jjyd', label: '竞价净额', comp: JjydTab },
   { key: 'review', label: '复盘', comp: ReviewTab },

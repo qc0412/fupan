@@ -18,6 +18,7 @@ export const useMarketStore = defineStore('market', {
     jjyd: [],            // 竞价净额
     topVolume: [],       // 大资金情绪明细
     capitalSignals: {},
+    kplInterval: null,
     ztPool: [],          // 涨停板
     ztDate: '',
     loading: false,
@@ -38,6 +39,7 @@ export const useMarketStore = defineStore('market', {
         this.jjyd = d.jjyd || []
         this.topVolume = d.top_volume || []
         this.capitalSignals = d.capital_signals || {}
+        this.kplInterval = d.kpl_interval || null
         this.ztPool = d.zt_pool || []
         this.ztDate = d.zt_date || ''
         this.error = ''

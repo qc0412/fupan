@@ -13,3 +13,8 @@ frontend/dist/
 # 复盘自动发布日志
 .publish_reviews.log
 .jingjia_auto.log
+.kailai_secret.json
+
+# 手动补跑日志
+.jingjia_manual_*.log
+.publish_manual_*.log
