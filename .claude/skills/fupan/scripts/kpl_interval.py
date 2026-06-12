@@ -179,28 +179,64 @@ def fetch_interval_sector(dstart, dend, top=6):
     return _dedup(merged)
 
 
-def default_range(today=None):
-    """默认区间: 近一周(end=今天, start=今天-6 天)。覆盖约一周交易日。
-    ⚠️ DEnd 非交易日/今天未开盘时接口整段返回空且【不会】自动对齐,
-    由 fetch_all() 的回退逻辑兜底。"""
-    end = today or date.today()
-    return (end - timedelta(days=6)).isoformat(), end.isoformat()
+def _snap_back_weekday(d):
+    """d 若落在周末则回退到最近的周五（区间端点必须是交易日，否则接口整段返回空）。"""
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
 
-def fetch_all(dstart=None, dend=None):
+def _prev_weekday(d):
+    d -= timedelta(days=1)
+    return _snap_back_weekday(d)
+
+
+def _next_weekday(d):
+    d += timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
+
+def default_range(today=None, days=5):
+    """默认区间: 近 days 个工作日（end=最近工作日, start=往前数第 days 个工作日）。
+    ⚠️ 脾气#4(2026-06-12 实测): 不只 DEnd——【DStart 落在周末/节假日同样整段返回空】，
+    所以两端都按工作日取；节假日(工作日休市)由 fetch_all() 的回退逻辑兜底。"""
+    end = _snap_back_weekday(today or date.today())
+    start = end
+    for _ in range(max(days, 1) - 1):
+        start = _prev_weekday(start)
+    return start.isoformat(), end.isoformat()
+
+
+def fetch_all(dstart=None, dend=None, days=5):
     if not dstart or not dend:
-        dstart, dend = default_range()
+        dstart, dend = default_range(days=days)
+    from datetime import datetime as _dt
+    # 两端先对齐到工作日（脾气#4：任一端落在周末 → 整段空）
+    d0 = _snap_back_weekday(_dt.strptime(dstart, "%Y-%m-%d").date())
+    d1 = _snap_back_weekday(_dt.strptime(dend, "%Y-%m-%d").date())
+    if d0 > d1:
+        d0 = d1
+    dstart, dend = d0.isoformat(), d1.isoformat()
     stocks = fetch_interval_stock(dstart, dend)
     sectors = fetch_interval_sector(dstart, dend)
-    # 脾气#1: DEnd 非交易日 → 整段空, 往前回退最多 7 天找最近有数据的交易日
-    from datetime import datetime as _dt
-    d0 = _dt.strptime(dstart, "%Y-%m-%d").date()
-    d1 = _dt.strptime(dend, "%Y-%m-%d").date()
+    # 脾气#1: DEnd 节假日/今天未开盘 → 整段空, DEnd 往前回退找最近交易日
     fallback = 0
-    while not stocks and not sectors and fallback < 7:
+    while not stocks and not sectors and fallback < 5:
         fallback += 1
-        d1 -= timedelta(days=1)
+        d1 = _prev_weekday(d1)
         if d1 < d0:
+            d0 = d1
+        dstart, dend = d0.isoformat(), d1.isoformat()
+        stocks = fetch_interval_stock(dstart, dend)
+        sectors = fetch_interval_sector(dstart, dend)
+    # 脾气#4 补充: DStart 节假日(工作日休市)也整段空 → DStart 往后挪找交易日
+    fallback = 0
+    while not stocks and not sectors and fallback < 5 and d0 < d1:
+        fallback += 1
+        d0 = _next_weekday(d0)
+        if d0 > d1:
             d0 = d1
         dstart, dend = d0.isoformat(), d1.isoformat()
         stocks = fetch_interval_stock(dstart, dend)
@@ -264,11 +300,13 @@ def _print_human(d):
 
 def main():
     ap = argparse.ArgumentParser(description="开盘啦区间榜(个股/板块)数据")
-    ap.add_argument("--start", help="区间开始 YYYY-MM-DD(默认近一周)")
-    ap.add_argument("--end", help="区间结束 YYYY-MM-DD(默认今天)")
+    ap.add_argument("--start", help="区间开始 YYYY-MM-DD(默认按 --days 推算)")
+    ap.add_argument("--end", help="区间结束 YYYY-MM-DD(默认最近工作日)")
+    ap.add_argument("--days", type=int, default=5,
+                    help="未给 start/end 时取近 N 个工作日，默认 5；/fupan 近3天用 --days 3")
     ap.add_argument("--json", action="store_true", help="输出 JSON 到 stdout")
     args = ap.parse_args()
-    d = fetch_all(args.start, args.end)
+    d = fetch_all(args.start, args.end, days=args.days)
     if args.json:
         print(json.dumps(d, ensure_ascii=False, indent=2))
     else:
