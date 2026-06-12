@@ -2,83 +2,79 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> 2026-06-12 整页重写：旧版描述的 templates/ 渲染、GitHub Actions 主路径、Render 生产、
+> duanxianxia 登录链等均已不存在。本文以当前实际架构为准。
+
 ## 项目概述
 
-两部分组成：
+三部分组成：
 
-1. **龙虎榜数据爬虫 + 静态展示页** — 抓取 `duanxianxia.cn` 龙虎榜数据，聚合近 30 个交易日多次上榜个股，渲染为单页 `index.html`。
-2. **A股短线龙头交易知识库** (`myMd/`) — Markdown 文档，配合 `fupan` / `fupan-week` 等 skill 使用。
+1. **行情数据网页**（本机即线上服务器）：Flask API + Vue 3 SPA，展示龙虎榜多日聚合、
+   竞价异动、大资金情绪、开盘啦区间榜、复盘报告。
+2. **A股短线龙头交易知识库**（`myMd/`）：交易体系/评分框架/复盘流程 Markdown。
+3. **三个仓库内 skill**（`.claude/skills/`）：`/fupan` 日复盘、`/jieli` 连板接力、
+   `/jingjia` 集合竞价，配套自动化链路（OpenClaw cron + hook + crontab 兜底）。
+
+## 线上架构（生产 = 本机）
+
+```
+nginx :80
+ ├─ /            → /var/www/fupan（Vue SPA 构建产物，deploy_nosudo.sh 发布）
+ └─ /api/, /healthz → 127.0.0.1:5002（gunicorn -w 1，systemd fupan.service）
+```
+
+- **后端** `app.py`：内存缓存 `_cache` + 各数据源 TTL 刷新（锁内单线程、失败冷却半个 TTL）。
+  - LHB（东财，30 交易日聚合）启动后台抓 + APScheduler 周一~五 18:30 兜底；
+  - 竞价异动/大资金情绪：`/` 请求按 TTL 刷（交易时段 30s，非交易 10 分钟）；
+  - 开盘啦区间榜：TTL 10 分钟/1 小时；空榜不许覆盖缓存/落盘（dict 恒真，判断必须看 stocks/sectors）；
+  - `/api/kpl_interval` 自选区间另有 64 槽短 TTL 查询缓存（一次区间查询最多放大成几十次上游调用，不能裸奔公网）；
+  - `_save_to_disk` 写 `data/data.json`（运行时产物，工作树常态脏，不要随手提交）；
+  - `/healthz` 返回各块条数。时区判断全走 `CN_TZ = UTC+8`（本机本身就是 Asia/Shanghai）。
+- **前端** `frontend/`（Vue 3 + Pinia + Vite）：`stores/market.js` 轮询 `/api/data`
+  （交易时段 30s/否则 5 分钟）；KPL 区间榜 tab 自管区间与自刷新（轮询不许覆盖用户手选区间）。
+  发布：`./deploy_nosudo.sh`（npm build + rsync 到 `/var/www/fupan`）。
+- **后端重载**：`./reload_backend.sh`（control socket 不一定真重启 worker；
+  必要时 `kill -HUP <gunicorn master pid>`，确认 worker PID 变了才算数）。
 
 ## 常用命令
 
 ```bash
-# 本地跑爬虫（生成 data/data.json）
-python scraper.py
-
-# 本地起 Flask（端口 5002，启动时刷新一次，每天 18:00 定时刷新）
-python app.py
-
-# 安装依赖
+python scraper.py                # 手动全量抓数据写 data/data.json（gunicorn 运行时勿并发跑）
+python app.py                    # 本地调试 Flask（生产走 systemd fupan.service）
+./deploy_nosudo.sh               # 构建前端并发布到 /var/www/fupan
+./reload_backend.sh              # 后端热重载（见上方注意事项）
 pip install -r requirements.txt
 ```
 
-爬虫鉴权：从环境变量 `DXX_USERNAME` / `DXX_PASSWORD` 读取，或回退到 `~/.claude/duanxianxia_credentials.json`。Cookie 缓存在仓库根的 `.cookie_cache`（已 gitignore）。
+## 数据源现状（scraper.py / kpl_api.py）
 
-## 架构关键点
+- **龙虎榜**：东财 `datacenter-web.eastmoney.com`，无需鉴权。
+  `fetch_multi_day_lhb()` 回溯最多 60 天找 30 个有数据交易日；剔除 `9` 开头、`ST`、`退`；同日同股保留首条。
+- **竞价净额**：`www.duanxianxia.com` AES 加密 JSON（IP 直连子域）。
+  文件头的 `_login()/_get_session()/DXX_USERNAME` 是 duanxianxia 旧登录链遗留**死代码**，现行路径不用。
+- **大资金情绪**：东财成交额榜 + 腾讯行情交叉验证（护栏：计算型指标多源互证）。
+- **开盘啦区间榜**：`kpl_api.py` 是**唯一实现**（接口四条脾气、两端工作日对齐、双向回退都在模块头）。
+  `/fupan` skill 的 `scripts/kpl_interval.py` 只是引用它的薄 CLI 包装，改逻辑只改 `kpl_api.py`。
+  开盘啦实时打板榜已被验签拦截（见 `kpl_sign.py`），区间榜是仅存裸连接口，哪天也失效则整块降级。
 
-### 数据流与分支策略
+## Skill 与自动化
 
-`fetch.yml` 工作流是生产路径，本地 `app.py` 主要用于调试：
+`/fupan`、`/jieli`、`/jingjia` 随仓库版本管理（**仓库为唯一真相**，`~/.claude/skills/*` 是 symlink）。
+它们是 LLM 驱动的分析任务，不是可独立运行的脚本。外部依赖：`~/.claude/mcp-servers/astock-data`
+（实时行情）。`mx-data` skill 本机未装——`dfcf_data.py` 调用必挂，主流程不依赖它。
 
-1. **dev 分支**（GitHub Actions 周一~周五 18:00 北京时间运行）：
-   - `python scraper.py` 写 `data/data.json`
-   - 内联 Python 用 `templates/index.html` 模板渲染成根目录 `index.html`
-   - 提交 `data/data.json` + `index.html` 到 dev
-2. **main 分支**：workflow 只把 dev 的 `index.html` cherry-pick 过来，作为对外静态站点。
+自动化链路分工（2026-06-12 起）：
+- **agent 定时运行**：OpenClaw cron（`openclaw cron list`）——周一~五 9:25 竞价、17:15 复盘+接力。
+  不要再往 crontab 加 agent 调度，会双跑打架。
+- **报告发布**：PostToolUse hook（Write/Edit 落 `~/claudeCode/*.md` 触发）+
+  crontab 每 10 分钟 `publish_reviews.py` 兜底（源文件 `scripts/fupan.crontab`）。
+  publish 提交 `data/reviews/` 并推送 dev，幂等。
+- **企业微信推送已整体移除**（2026-06-12：webhook key 曾泄露进公开 git 历史，直接废弃不恢复）。
 
-**修改模板/数据逻辑时**：在 dev 上改 `templates/index.html` 和 `scraper.py`，让 workflow 重新渲染；不要手动改根目录 `index.html`（它会被覆盖）。
+## 分支与历史遗留
 
-### scraper.py 设计
-
-- `_get_session()` 优先使用磁盘 cookie；`get_lhb()` 在响应为空时自动 `_login()` 重试一次，处理 cookie 失效。
-- `fetch_multi_day_lhb()` 向前回溯最多 60 天找出 30 个有数据的交易日（跳过周末和无数据日）。
-- 过滤规则：剔除以 `9` 开头的代码（B股）和名称含 `ST` 的个股；同一日同股票只保留首条记录。
-- 输出按上榜次数倒序排序。
-
-### 展示页过滤
-
-`templates/index.html` 内置 JS 按"近 N 交易日上榜 ≥2 次"动态过滤，N 由按钮切换（3/7/10）。`trading_days` 数组由后端给定，前端只做切片。
-
-## MCP 与 Skill
-
-- `.claude/settings.local.json` 启用 `astock-data` MCP，提供实时 A 股行情查询。
-- 复盘任务调用 skill：日复盘 `fupan`、周复盘 `fupan-week`、龙头识别 `earlyLeader`。
-
-### 仓库内置 skill（`.claude/skills/`）
-
-`fupan`（A股短线龙头日复盘）和 `jieli`（连板接力盘后分析）已**随仓库版本管理**，输入 `/fupan`、`/jieli` 即可调用。注意它们是 **LLM 驱动**的分析任务（由 Claude 按框架逐只判定产出报告），不是能独立运行的脚本。
-
-- **目录结构**：`jieli/SKILL.md` 用相对路径 `../fupan/复盘心法-记忆补充.md` 引用 fupan 的心法补充，两个 skill 必须同在 `.claude/skills/` 下。skill 自带 py 脚本的 `sys.path` 已改为相对 `__file__`，仓库副本加载自身代码而非用户级 `~/.claude` 副本。
-- **外部前置依赖（不随仓库携带，需本机另装）**：
-  - `astock-data` MCP（`~/.claude/mcp-servers/astock-data`）— 实时行情，`fetch_realtime_data.py` / `premium_ladder.py` 依赖。
-  - `mx-data` skill（`~/.claude/skills/mx-data`）— `dfcf_data.py` 依赖。
-  - skill 真正吃的涨停池 / K线 / 板块强度仍走实时数据源，本项目 `data/data.json`（龙虎榜 + 竞价异动）只能作为**补充本地数据源**，替代不了上述实时部分。
-- **运行时产物已 gitignore**：`.claude/skills/**/.cache/`、`mx_data_output/`。
-- 同名 skill 在 `~/.claude/skills/` 下仍有用户级副本；项目级优先，长期维护注意两者别各改各的（建议以仓库内为准）。
-- 知识库文档：
-  - `myMd/短线交易系统.md` — 交易体系（最强票选股逻辑、买卖条件、仓位管理）
-  - `myMd/A股短线龙头复盘框架 V1.0（优化版）.md` — 评分框架
-  - `myMd/复盘.md` — 每日复盘流程清单
-
-## 部署
-
-**响应式生产 (Render.com)**：[render.yaml](render.yaml) 部署 Flask 服务，绑定 `dev` 分支（`data/data.json` 提交在 dev）。需在 Render 后台配置 `DXX_USERNAME` / `DXX_PASSWORD`。
-
-[app.py](app.py) 的刷新策略：
-- 启动优先 `_load_from_disk()` 读 `data/data.json`，没有数据才阻塞抓 LHB。
-- 竞价异动按 TTL 在 `/` 请求时刷新：交易时段 30 秒，非交易时段 10 分钟，锁内单线程。
-- LHB 由 `APScheduler` 在北京时间周一~周五 18:30 兜底刷新（主路径仍是 GitHub Actions 18:00 抓数据 → 推 dev → 触发 Render 自动部署）。
-- `/healthz` 返回 LHB/竞价条数。
-- 时区：所有时间判断走 `CN_TZ = UTC+8`，容器跑在 UTC 也不会算错。
-
-**静态镜像**：`fetch.yml` workflow 把渲染好的 `index.html` cherry-pick 到 main 分支。竞价数据会冻结在 18:00 那一刻的快照，仅适合无后端的镜像部署。
+- 仓库**公开**，工作分支 dev；main 冻结于 2026-06-06，是旧静态站点时代的遗物。
+- 遗留待清理（勿当现行架构）：根目录 `index.html`（旧静态页）、`.github/workflows/fetch.yml`
+  （已停用，手动触发也会因 templates/ 不存在而失败）、`render.yaml`（Render 镜像，未在维护）、
+  scraper 登录链死代码、`.cookie_cache`。
+- 凭证卫生：任何 key/token 走 `~/.config/fupan/` 或环境变量，明文严禁入库（已经吃过一次亏）。
